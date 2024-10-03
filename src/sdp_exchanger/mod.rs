@@ -1,5 +1,7 @@
 mod webcam_rtc;
 
+use crate::error::Result;
+use log::info;
 use webcam_rtc::start_webrtc;
 
 use std::{
@@ -14,8 +16,9 @@ use bluer::{
     adv::Advertisement,
     gatt::{
         local::{
-            characteristic_control, Application, Characteristic, CharacteristicControlEvent,
-            CharacteristicNotify, CharacteristicNotifyMethod, CharacteristicWrite,
+            characteristic_control, Application, Characteristic,
+            CharacteristicControlEvent, CharacteristicNotify,
+            CharacteristicNotifyMethod, CharacteristicWrite,
             CharacteristicWriteMethod, Service,
         },
         CharacteristicReader, CharacteristicWriter,
@@ -32,7 +35,9 @@ use v4l2loopback::{add_device, delete_device, query_device, DeviceConfig};
 
 use crate::{
     app_data_store::AppStore,
-    gatt_const::{SDP_NOTIFY_CHAR_UUID, SDP_WRITE_CHAR_UUID, WEBCAM_PNP_WRITE_CHAR_UUID},
+    gatt_const::{
+        SDP_NOTIFY_CHAR_UUID, SDP_WRITE_CHAR_UUID, WEBCAM_PNP_WRITE_CHAR_UUID,
+    },
 };
 
 pub struct SdpExchanger {
@@ -44,17 +49,12 @@ pub struct SdpExchanger {
 
 impl SdpExchanger {
     pub fn new(ble_adapter: Adapter, app_store: AppStore) -> Self {
-        Self {
-            ble_adapter,
-            app_store,
-            main_thread: None,
-            _tx_drop: None,
-        }
+        Self { ble_adapter, app_store, main_thread: None, _tx_drop: None }
     }
 
-    pub async fn start(&mut self) -> Result<(), String> {
+    pub async fn start(&mut self) -> Result<()> {
         let host_id = self.app_store.get_host_id();
-        let host_id_uuid = Uuid::from_str(&host_id).map_err(|e| e.to_string())?;
+        let host_id_uuid = Uuid::from_str(&host_id)?;
 
         let mut services = BTreeSet::<Uuid>::new();
         services.insert(host_id_uuid);
@@ -68,7 +68,8 @@ impl SdpExchanger {
 
         let (tx, mut rx) = oneshot::channel();
         self._tx_drop = Some(tx);
-        let (webcam_char_control, webcam_char_handle) = characteristic_control();
+        let (webcam_char_control, webcam_char_handle) =
+            characteristic_control();
 
         let adapter = self.ble_adapter.clone();
         let app_store = self.app_store.clone();
@@ -89,42 +90,65 @@ impl SdpExchanger {
                                 write_without_response: true,
                                 write: true,
                                 reliable_write: true,
-                                method: CharacteristicWriteMethod::Fun(Box::new(
-                                    move |new_value, req| {
+                                method: CharacteristicWriteMethod::Fun(
+                                    Box::new(move |new_value, req| {
                                         let offer_sdp = offer_sdp.clone();
                                         let tx = answer_tx.clone();
-                                        println!("req: {:?}", req);
+                                        info!("req: {:?}", req);
                                         async move {
-                                            let offer = String::from_utf8(new_value).unwrap();
-                                            println!("Offer: {}", offer);
+                                            let offer =
+                                                String::from_utf8(new_value)
+                                                    .unwrap();
+                                            info!("Offer: {}", offer);
 
                                             //identify end of base64 string
                                             if offer.ends_with("}") {
                                                 //concat answer with next base64 string
                                                 let offer_sdp_clone = {
-                                                    let mut offer_sdp = offer_sdp.lock().unwrap();
-                                                    *offer_sdp = format!("{}{}", *offer_sdp, offer);
+                                                    let mut offer_sdp =
+                                                        offer_sdp
+                                                            .lock()
+                                                            .unwrap();
+                                                    *offer_sdp = format!(
+                                                        "{}{}",
+                                                        *offer_sdp, offer
+                                                    );
                                                     offer_sdp.clone()
                                                 };
 
-                                                println!("Offer so far: {}", offer_sdp_clone);
+                                                info!(
+                                                    "Offer so far: {}",
+                                                    offer_sdp_clone
+                                                );
 
-                                                let answer_sdp = start_webrtc(&offer_sdp_clone, 2)
+                                                let answer_sdp = start_webrtc(
+                                                    &offer_sdp_clone,
+                                                    0,
+                                                )
+                                                .await
+                                                .unwrap();
+                                                info!(
+                                                    "Answer to send: {}",
+                                                    &answer_sdp
+                                                );
+                                                tx.send(answer_sdp)
                                                     .await
                                                     .unwrap();
-                                                println!("Answer to send: {}", &answer_sdp);
-                                                tx.send(answer_sdp).await.unwrap();
                                             } else {
                                                 //concat answer with next base64 string
-                                                let mut offer_sdp = offer_sdp.lock().unwrap();
-                                                *offer_sdp = format!("{}{}", *offer_sdp, offer);
-                                                //     println!("Offer so far: {}", offer_sdp);
+                                                let mut offer_sdp =
+                                                    offer_sdp.lock().unwrap();
+                                                *offer_sdp = format!(
+                                                    "{}{}",
+                                                    *offer_sdp, offer
+                                                );
+                                                //     info!("Offer so far: {}", offer_sdp);
                                             }
                                             return Ok(());
                                         }
                                         .boxed()
-                                    },
-                                )),
+                                    }),
+                                ),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -133,24 +157,24 @@ impl SdpExchanger {
                             uuid: SDP_NOTIFY_CHAR_UUID,
                             notify: Some(CharacteristicNotify {
                                 notify: true,
-                                method: CharacteristicNotifyMethod::Fun(Box::new(
-                                    move |mut notifier| {
+                                method: CharacteristicNotifyMethod::Fun(
+                                    Box::new(move |mut notifier| {
                                         let answer_rx = answer_recv.clone();
                                         async move {
                                             let answer_rx = answer_rx.clone();
                                                 tokio::spawn(async move{
                                                     let answer_rx = answer_rx.clone();
-                                                    println!(
+                                                    info!(
                                                         "Notification session start with confirming={:?}",
                                                         notifier.confirming()
                                                     );
 
                                                     loop {
                                                         //send answer in chunks of 200 bytes
-                                                        println!("Waiting for answer");
+                                                        info!("Waiting for answer");
                                                         let mut answer_rx = answer_rx.lock().await;
                                                         let answer = answer_rx.recv().await.unwrap();
-                                                        println!("Answer received {}", &answer);
+                                                        info!("Answer received {}", &answer);
                                                         let mut i = 0;
                                                         while i < answer.len() {
                                                             let end = std::cmp::min(i + 200, answer.len());
@@ -158,7 +182,7 @@ impl SdpExchanger {
                                                                 .notify(answer[i..end].to_string().into_bytes())
                                                                     .await
                                                             {
-                                                                println!("Notification error: {}", &err);
+                                                                info!("Notification error: {}", &err);
                                                                 break;
                                                             }
                                                             i = end;
@@ -166,12 +190,12 @@ impl SdpExchanger {
                                                         break;
                                                     }
 
-                                                    println!("Notification session stop");
+                                                    info!("Notification session stop");
                                                 });
                                             }
                                             .boxed()
-                                    },
-                                )),
+                                    }),
+                                ),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -192,10 +216,13 @@ impl SdpExchanger {
                 ..Default::default()
             };
 
-            let _advertisement_handle = Some(adapter.advertise(le_advertisement.clone()).await);
-            let _adapter_handle = adapter.serve_gatt_application(app).await.unwrap();
+            let _advertisement_handle =
+                Some(adapter.advertise(le_advertisement.clone()).await);
+            let _adapter_handle =
+                adapter.serve_gatt_application(app).await.unwrap();
 
-            let mobile_cam = Arc::new(Mutex::new(HashMap::<String, u32>::new()));
+            let mobile_cam =
+                Arc::new(Mutex::new(HashMap::<String, u32>::new()));
 
             let mut reader_webcam_opt: Option<CharacteristicReader> = None;
 
@@ -215,19 +242,19 @@ impl SdpExchanger {
                     adapter_event = adapter_events.next() => {
                         match adapter_event {
                             Some(AdapterEvent::DeviceAdded(address)) => {
-                                println!("Adapter event Device Added: {:?}", address);
+                                info!("Adapter event Device Added: {:?}", address);
                                 let device = adapter.device(address).expect("Error when getting device");
                             }
                             Some(AdapterEvent::DeviceRemoved(address)) => {
                                 let mobile_address = address.to_string();
                                 if let Some(device_num) = mobile_cam.lock().unwrap().remove(&mobile_address) {
-                                    println!("Unmounting device with number: {}", device_num);
+                                    info!("Unmounting device with number: {}", device_num);
                                     delete_device(device_num).expect("Error when removing device");
                                 }
-                                println!("Adapter event Device Removed: {}", mobile_address);
+                                info!("Adapter event Device Removed: {}", mobile_address);
                             }
                             _ => {
-                                println!("Adapter event: {:?}", adapter_event);
+                                info!("Adapter event: {:?}", adapter_event);
                             }
                         }
                     }
@@ -237,8 +264,8 @@ impl SdpExchanger {
                         //clean all devices in mobile_address
                         let mobile_cam = {mobile_cam.lock().unwrap().clone()};
                         for (mobile_address, device_num) in mobile_cam.iter() {
-                            println!("Unmounting device with number: {}", device_num);
-                            println!("Removing device with mobile address: {}", mobile_address);
+                            info!("Unmounting device with number: {}", device_num);
+                            info!("Removing device with mobile address: {}", mobile_address);
                             let device_add = Address::from_str(&mobile_address).unwrap();
                             let device = adapter.device(device_add).expect("Error when getting device");
                             device.disconnect().await.expect("Error when disconnecting device");
@@ -254,7 +281,7 @@ impl SdpExchanger {
                                 reader_webcam_opt = Some(req.accept().unwrap());
                             },
                             Some(_) => print!("Another event"),
-                            None => print!("Another None evnet")
+                            None => print!("Another None event")
                         }
                     }
 
@@ -262,10 +289,10 @@ impl SdpExchanger {
                     /*
                        _ = advs_duration.tick() => {
                        if advertisement_handle.is_none() {
-                       println!("Advertising sdp again");
+                       info!("Advertising sdp again");
                        advertisement_handle = Some(adapter.advertise(le_advertisement.clone()).await);
                        } else {
-                       println!("Stop Advertising sdp again");
+                       info!("Stop Advertising sdp again");
                        let _ = adapter.advertise(le_advertisement.clone()).await;
                        }
                        }
@@ -275,16 +302,16 @@ impl SdpExchanger {
                         match &mut reader_webcam_opt {
                             Some(reader) => {
                                 read_webcam_buf = vec![0; reader.mtu()];
-                                println!("mtu in reader: {}, device address: {}", reader.mtu(), reader.device_address());
+                                info!("mtu in reader: {}, device address: {}", reader.mtu(), reader.device_address());
                                 let read = reader.read(&mut read_webcam_buf).await;
                                 let null_index = read_webcam_buf.iter().position(|&x| x == 0).unwrap_or(read_webcam_buf.len());
                                 let read_buf = read_webcam_buf[..null_index].to_vec();
                                 let mobile_uuid = String::from_utf8(read_buf).unwrap();
                                 let registered_mobiles = app_store.get_registered_mobiles().await;
-                                println!("Sent Mobile ID: {}", mobile_uuid);
+                                info!("Sent Mobile ID: {}", mobile_uuid);
                                 let mut mobile_cam = mobile_cam.lock().unwrap();
                                 if registered_mobiles.contains_key(&mobile_uuid) && !mobile_cam.contains_key(&reader.device_address().to_string())  {
-                                    println!("Registered Mobile ID: {}", mobile_uuid);
+                                    info!("Registered Mobile ID: {}", mobile_uuid);
                                     let device_config = DeviceConfig {
                                         label: "Test Device".to_string(),
                                         min_width: 100,
@@ -299,7 +326,7 @@ impl SdpExchanger {
                                         add_device(None, device_config.clone()).expect("Error when creating the device");
 
                                     let mobile_address = reader.device_address().to_string();
-                                    println!("Adding mobile address: {}", mobile_address);
+                                    info!("Adding mobile address: {}", mobile_address);
                                     mobile_cam.insert(mobile_address, device_num);
 
                                     // Querying informations about a device
@@ -307,10 +334,10 @@ impl SdpExchanger {
                                     let cfg =
                                         query_device(device_num).expect("Error when querying the device");
 
-                                    println!("device config: {:?}", cfg);
+                                    info!("device config: {:?}", cfg);
 
                                 } else {
-                                    println!("Mobile ID not registered or already have a device assigned: {}", mobile_uuid);
+                                    info!("Mobile ID not registered or already have a device assigned: {}", mobile_uuid);
                                 }
                                 read
                             },
@@ -319,15 +346,15 @@ impl SdpExchanger {
                     } => {
                         match read_webcam_res {
                             Ok(0) => {
-                                println!("Write stream ended");
+                                info!("Write stream ended");
                                 reader_webcam_opt = None;
                             }
                             Ok(n) => {
-                                println!("Write request with {} bytes", n);
-                                println!("Write request: {:?}", &read_webcam_buf[..n]);
+                                info!("Write request with {} bytes", n);
+                                info!("Write request: {:?}", &read_webcam_buf[..n]);
                             }
                             Err(err) => {
-                                println!("Write stream error: {}", &err);
+                                info!("Write stream error: {}", &err);
                                 reader_webcam_opt = None;
                             }
                         }
@@ -335,16 +362,16 @@ impl SdpExchanger {
 
                 }
             }
-            println!("End of advertise thread");
+            info!("End of advertise thread");
         }));
 
         Ok(())
     }
 
-    pub async fn stop(&mut self) -> Result<(), String> {
+    pub async fn stop(&mut self) -> Result<()> {
         self._tx_drop.take();
         if let Some(thread) = self.main_thread.take() {
-            thread.await.map_err(|e| e.to_string())?;
+            thread.await?;
         }
         Ok(())
     }

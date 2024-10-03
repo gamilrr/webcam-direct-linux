@@ -2,6 +2,7 @@ use std::fs::File;
 use std::sync::Arc;
 
 use anyhow::Result;
+use log::info;
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
 use v4l;
@@ -35,22 +36,22 @@ async fn save_to_disk(
 
                     w.write_rtp(&rtp_packet)?;
                 }else{
-                    println!("file closing begin after read_rtp error");
+                    info!("file closing begin after read_rtp error");
                     let mut w = writer.lock().await;
                     if let Err(err) = w.close() {
-                        println!("file close err: {err}");
+                        info!("file close err: {err}");
                     }
-                    println!("file closing end after read_rtp error");
+                    info!("file closing end after read_rtp error");
                     return Ok(());
                 }
             }
             _ = notify.notified() => {
-                println!("file closing begin after notified");
+                info!("file closing begin after notified");
                 let mut w = writer.lock().await;
                 if let Err(err) = w.close() {
-                    println!("file close err: {err}");
+                    info!("file close err: {err}");
                 }
-                println!("file closing end after notified");
+                info!("file closing end after notified");
                 return Ok(());
             }
         }
@@ -63,7 +64,7 @@ pub async fn start_webrtc(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let video_file = "/dev/video".to_string() + device.to_string().as_str();
 
-    println!("video file: {}", video_file);
+    info!("video file: {}", video_file);
 
     let h264_writer: Arc<Mutex<dyn webrtc::media::io::Writer + Send + Sync>> =
         Arc::new(Mutex::new(H264Writer::new(File::create(video_file)?)));
@@ -163,7 +164,7 @@ pub async fn start_webrtc(
             let codec = track.codec();
             let mime_type = codec.capability.mime_type.to_lowercase();
             if mime_type == MIME_TYPE_H264.to_lowercase() {
-                println!("Got h264 track, saving to disk as output.h264");
+                info!("Got h264 track, saving to disk as output.h264");
                 tokio::spawn(async move {
                     let _ = save_to_disk(h264_writer2, track, notify_rx2).await;
                 });
@@ -177,14 +178,14 @@ pub async fn start_webrtc(
     // This will notify you when the peer has connected/disconnected
     peer_connection.on_ice_connection_state_change(Box::new(
         move |connection_state: RTCIceConnectionState| {
-            println!("Connection State has changed {connection_state}");
+            info!("Connection State has changed {connection_state}");
 
             if connection_state == RTCIceConnectionState::Connected {
-                println!("Ctrl+C the remote client to stop the demo");
+                info!("Ctrl+C the remote client to stop the demo");
             } else if connection_state == RTCIceConnectionState::Failed {
                 notify_tx.notify_waiters();
 
-                println!("Done writing media files");
+                info!("Done writing media files");
 
                 let _ = done_tx.try_send(());
             }
@@ -195,7 +196,7 @@ pub async fn start_webrtc(
     // Wait for the offer to be pasted
     //let line = signal::must_read_stdin()?;
     //Read from BLE
-    println!("Read from BLE {}", offer_sdp);
+    info!("Read from BLE {}", offer_sdp);
     let offer = serde_json::from_str(&offer_sdp).unwrap();
 
     // Set the remote SessionDescription
@@ -218,10 +219,10 @@ pub async fn start_webrtc(
     // Output the answer in base64 so we can paste it in browser
     if let Some(local_desc) = peer_connection.local_description().await {
         let json_str = serde_json::to_string(&local_desc)?;
-        println!("Answer: {}", json_str);
+        info!("Answer: {}", json_str);
         return Ok(json_str);
     } else {
-        println!("generate local_description failed!");
+        info!("generate local_description failed!");
     }
 
     return Ok("".to_string());

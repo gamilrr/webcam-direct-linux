@@ -7,6 +7,7 @@ use std::{
 };
 
 use host_entity::{ConnectionType, HostInfo};
+use log::info;
 use mobile_entity::MobileInfo;
 
 use bluer::Uuid;
@@ -34,7 +35,8 @@ async fn create_app_data(config_file_path: &Path) -> Result<AppData, String> {
         registered_mobiles: HashMap::new(),
     };
 
-    let app_data_store_str = serde_json::to_string(&app_data_store).map_err(|e| e.to_string())?;
+    let app_data_store_str =
+        serde_json::to_string(&app_data_store).map_err(|e| e.to_string())?;
 
     tokio::fs::write(config_file_path, app_data_store_str)
         .await
@@ -53,12 +55,14 @@ pub struct AppStore {
 
 impl AppStore {
     pub async fn new(config_file: &str) -> Self {
-        let proj_dirs = ProjectDirs::from("com", "grr", "webcam-direct").unwrap();
+        let proj_dirs =
+            ProjectDirs::from("com", "grr", "webcam-direct").unwrap();
         let config_dir = proj_dirs.config_dir();
         let config_file_path = config_dir.join(config_file);
 
         let app_data_store = if config_file_path.exists() {
-            let config_file = tokio::fs::read_to_string(&config_file_path).await.unwrap();
+            let config_file =
+                tokio::fs::read_to_string(&config_file_path).await.unwrap();
             serde_json::from_str(&config_file).unwrap()
         } else {
             tokio::fs::create_dir_all(config_dir).await.unwrap();
@@ -88,15 +92,14 @@ impl AppStore {
 
     pub async fn add_mobile(&self, mobile: MobileInfo) -> Result<(), String> {
         {
-            let mut app_data = self.app_data.lock().map_err(|e| e.to_string())?;
-            app_data
-                .registered_mobiles
-                .insert(mobile.id.clone(), mobile);
+            let mut app_data =
+                self.app_data.lock().map_err(|e| e.to_string())?;
+            app_data.registered_mobiles.insert(mobile.id.clone(), mobile);
         }
 
         self.update_app_data().await.map_err(|e| e.to_string())?;
 
-        println!(
+        info!(
             "Mobile added: {:?}",
             self.app_data.lock().unwrap().registered_mobiles
         );
@@ -108,7 +111,8 @@ impl AppStore {
         //avoid MutexGuard issue across await
         let app_data = { self.app_data.lock().unwrap().clone() };
 
-        let app_data_str = serde_json::to_string(&app_data).map_err(|e| e.to_string())?;
+        let app_data_str =
+            serde_json::to_string(&app_data).map_err(|e| e.to_string())?;
 
         tokio::fs::write(&(self.config_file_path), app_data_str)
             .await

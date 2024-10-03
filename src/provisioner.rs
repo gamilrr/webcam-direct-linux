@@ -1,11 +1,13 @@
-use std::{collections::BTreeSet, future, str::FromStr, time::Duration};
+use crate::error::Result;
+use std::{collections::BTreeSet, future};
 
 use bluer::{
     adv::Advertisement,
     gatt::{
         local::{
-            characteristic_control, Application, Characteristic, CharacteristicControlEvent,
-            CharacteristicRead, CharacteristicReadRequest, CharacteristicWrite,
+            characteristic_control, Application, Characteristic,
+            CharacteristicControlEvent, CharacteristicRead,
+            CharacteristicReadRequest, CharacteristicWrite,
             CharacteristicWriteMethod, Service,
         },
         CharacteristicReader,
@@ -13,12 +15,16 @@ use bluer::{
     Adapter, Uuid,
 };
 use futures::{channel::oneshot, pin_mut, FutureExt, StreamExt};
+use log::info;
 use serde_json::json;
-use tokio::{io::AsyncReadExt, time::interval};
+use tokio::io::AsyncReadExt;
 
 use crate::{
     app_data_store::{mobile_entity::MobileInfo, AppStore},
-    gatt_const::{PROV_CHAR_HOST_INFO_UUID, PROV_CHAR_MOBILE_INFO_UUID, PROV_SERV_HOST_UUID},
+    gatt_const::{
+        PROV_CHAR_HOST_INFO_UUID, PROV_CHAR_MOBILE_INFO_UUID,
+        PROV_SERV_HOST_UUID,
+    },
 };
 
 pub struct Provisioner {
@@ -29,14 +35,10 @@ pub struct Provisioner {
 
 impl Provisioner {
     pub fn new(ble_adapter: Adapter, app_store: AppStore) -> Self {
-        Self {
-            ble_adapter,
-            app_store,
-            _tx_drop: None,
-        }
+        Self { ble_adapter, app_store, _tx_drop: None }
     }
 
-    pub async fn start_provisioning(&mut self) -> Result<(), String> {
+    pub async fn start_provisioning(&mut self) -> Result<()> {
         let mut services = BTreeSet::<Uuid>::new();
         services.insert(PROV_SERV_HOST_UUID);
 
@@ -49,7 +51,8 @@ impl Provisioner {
 
         let (tx, mut rx) = oneshot::channel();
         self._tx_drop = Some(tx);
-        let (mobile_char_control, mobile_char_handle) = characteristic_control();
+        let (mobile_char_control, mobile_char_handle) =
+            characteristic_control();
 
         let host_id = self.app_store.get_host_id();
         let app = Application {
@@ -61,24 +64,26 @@ impl Provisioner {
                         uuid: PROV_CHAR_HOST_INFO_UUID,
                         read: Some(CharacteristicRead {
                             read: true,
-                            fun: Box::new(move |req: CharacteristicReadRequest| {
-                                println!(
-                                    "Read request with MTU {} from {}",
-                                    req.mtu,
-                                    req.device_address.to_string()
-                                );
-                                let host_id = host_id.clone();
-                                async move {
-                                    println!("Sending host info");
-                                    let host_info = json!({
-                                        "i": host_id,
-                                        "c": "w",
-                                    });
+                            fun: Box::new(
+                                move |req: CharacteristicReadRequest| {
+                                    info!(
+                                        "Read request with MTU {} from {}",
+                                        req.mtu,
+                                        req.device_address.to_string()
+                                    );
+                                    let host_id = host_id.clone();
+                                    async move {
+                                        info!("Sending host info");
+                                        let host_info = json!({
+                                            "i": host_id,
+                                            "c": "w",
+                                        });
 
-                                    Ok(host_info.to_string().into_bytes())
-                                }
-                                .boxed()
-                            }),
+                                        Ok(host_info.to_string().into_bytes())
+                                    }
+                                    .boxed()
+                                },
+                            ),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -103,73 +108,63 @@ impl Provisioner {
         let adapter = self.ble_adapter.clone();
         let app_store = self.app_store.clone();
         tokio::spawn(async move {
-            let advertisement_handle = Some(adapter.advertise(le_advertisement.clone()).await);
-            let _adapter_handle = adapter.serve_gatt_application(app).await.unwrap();
+            let _advertisement_handle =
+                Some(adapter.advertise(le_advertisement.clone()).await);
+            let _adapter_handle =
+                adapter.serve_gatt_application(app).await.unwrap();
 
             let mut read_buf = Vec::new();
             let mut reader_opt: Option<CharacteristicReader> = None;
-            let mut advs_duration = interval(Duration::from_secs(10));
             pin_mut!(mobile_char_control);
 
             loop {
                 tokio::select! {
-                                    _ = &mut rx => {break}
+                    _ = &mut rx => {break}
 
-                                    evt = mobile_char_control.next() => {
-                                        match evt {
-                                            Some(CharacteristicControlEvent::Write(req)) => {
-                                                println!("Accepting write event with MTU {} from {}", req.mtu(), req.device_address());
-                                                reader_opt = Some(req.accept().unwrap());
-                                            },
-                                            Some(_) => print!("Another event"),
-                                            None => print!("Another None evnet")
-                                        }
-                                    }
-                /*
-                                    _ = advs_duration.tick() => {
-                                        if advertisement_handle.is_none() {
-                                            println!("Advertising provisioner again");
-                                            advertisement_handle = Some(adapter.advertise(le_advertisement.clone()).await);
-                                        } else {
-                                            println!("Stop Advertising provisioner again");
-                                            let _ = advertisement_handle.take();
-                                        }
-                                    }
-                */
-                                    read_res = async {
-                                        match &mut reader_opt {
-                                            Some(reader) => {
-                                                println!("mtu in reader: {}, device address: {}", reader.mtu(), reader.device_address());
-                                                read_buf = vec![0; reader.mtu()];
-                                                let read = reader.read(&mut read_buf).await;
-                                                let null_index = read_buf.iter().position(|&x| x == 0).unwrap_or(read_buf.len());
-                                                let read_buf_json = read_buf[..null_index].to_vec();
-                                                let mobile_info_json = String::from_utf8(read_buf_json).unwrap();
-                                                println!("Mobile info: {:?}", mobile_info_json);
-                                                let mobile_info: MobileInfo = serde_json::from_str(&mobile_info_json).unwrap();
-                                                app_store.add_mobile(mobile_info).await.unwrap();
-                                                read
-                                            },
-                                            None => future::pending().await,
-                                        }
-                                    } => {
-                                        match read_res {
-                                            Ok(0) => {
-                                                println!("Write stream ended");
-                                                reader_opt = None;
-                                            }
-                                            Ok(n) => {
-                                                println!("Write request with {} bytes", n);
-                                            }
-                                            Err(err) => {
-                                                println!("Write stream error: {}", &err);
-                                                reader_opt = None;
-                                            }
-                                        }
-                                    }
-                                }
+                    evt = mobile_char_control.next() => {
+                        match evt {
+                            Some(CharacteristicControlEvent::Write(req)) => {
+                                info!("Accepting write event with MTU {} from {}", req.mtu(), req.device_address());
+                                reader_opt = Some(req.accept().unwrap());
+                            },
+                            Some(_) => print!("Another event"),
+                            None => print!("Another None event")
+                        }
+                    }
+                    read_res = async {
+                        match &mut reader_opt {
+                            Some(reader) => {
+                                info!("mtu in reader: {}, device address: {}", reader.mtu(), reader.device_address());
+                                read_buf = vec![0; reader.mtu()];
+                                let read = reader.read(&mut read_buf).await;
+                                let null_index = read_buf.iter().position(|&x| x == 0).unwrap_or(read_buf.len());
+                                let read_buf_json = read_buf[..null_index].to_vec();
+                                let mobile_info_json = String::from_utf8(read_buf_json).unwrap();
+                                info!("Mobile info: {:?}", mobile_info_json);
+                                let mobile_info: MobileInfo = serde_json::from_str(&mobile_info_json).unwrap();
+                                app_store.add_mobile(mobile_info).await.unwrap();
+                                read
+                            },
+                            None => future::pending().await,
+                        }
+                    } => {
+                        match read_res {
+                            Ok(0) => {
+                                info!("Write stream ended");
+                                reader_opt = None;
+                            }
+                            Ok(n) => {
+                                info!("Write request with {} bytes", n);
+                            }
+                            Err(err) => {
+                                info!("Write stream error: {}", &err);
+                                reader_opt = None;
+                            }
+                        }
+                    }
+                }
             }
-            println!("End of advertise thread");
+            info!("End of advertise thread");
         });
 
         Ok(())
