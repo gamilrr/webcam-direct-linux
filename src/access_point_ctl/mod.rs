@@ -129,13 +129,21 @@ impl<I: IwLinkHandler, D: DhcpServerCtl, W: WifiManagerCtl> AccessPointCtl
 
         // In ubuntu the network manager will try to take control of the interface causing a
         // hostapd to fail to start. We need to disable the network manager for the interface
-        let _output = std::process::Command::new("nmcli")
+        if let Ok(_) = std::process::Command::new("nmcli")
             .arg("device")
             .arg("set")
             .arg(&if_name)
             .arg("managed")
             .arg("no")
-            .output()?;
+            .output()
+        {
+            info!("Network manager disabled for interface {}", if_name);
+        } else {
+            warn!(
+                "Failed to disable network manager for interface {}",
+                if_name
+            );
+        }
 
         if let Err(error) = self.iw_link.add_ipv4_addr(route_ip) {
             error!(

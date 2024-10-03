@@ -209,6 +209,7 @@ mod tests {
 
         mock_wpa_ctl.expect_set_ssid().returning(|_| Ok(()));
         mock_wpa_ctl.expect_set_password().returning(|_| Ok(()));
+        mock_wpa_ctl.expect_reload().returning(|| Ok(()));
 
         let mut wifi_manager = WifiManager::new(mock_hostapd, mock_wpa_ctl);
         let creds = WifiCredentials {
