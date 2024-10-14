@@ -232,8 +232,13 @@ mod tests {
 
     use super::*;
 
+    fn init_logger() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     #[test]
     fn test_configure_success() {
+        init_logger();
         let mut mock_iw_link = MockIwLinkHandler::new();
         let mock_dhcp_server = MockDhcpServerCtl::new();
         let mut mock_wifi_manager = MockWifiManagerCtl::new();
@@ -273,6 +278,7 @@ mod tests {
 
     #[test]
     fn test_start_wifi_success() {
+        init_logger();
         let mock_iw_link = MockIwLinkHandler::new();
         let mock_dhcp_server = MockDhcpServerCtl::new();
         let mut mock_wifi_manager = MockWifiManagerCtl::new();
@@ -291,6 +297,7 @@ mod tests {
 
     #[test]
     fn test_stop_wifi_success() {
+        init_logger();
         let mock_iw_link = MockIwLinkHandler::new();
         let mock_dhcp_server = MockDhcpServerCtl::new();
         let mut mock_wifi_manager = MockWifiManagerCtl::new();
@@ -309,6 +316,7 @@ mod tests {
 
     #[test]
     fn test_set_creds_success() {
+        init_logger();
         let mock_iw_link = MockIwLinkHandler::new();
         let mock_dhcp_server = MockDhcpServerCtl::new();
         let mut mock_wifi_manager = MockWifiManagerCtl::new();
@@ -336,6 +344,7 @@ mod tests {
 
     #[test]
     fn test_get_creds() {
+        init_logger();
         let mock_iw_link = MockIwLinkHandler::new();
         let mock_dhcp_server = MockDhcpServerCtl::new();
         let mock_wifi_manager = MockWifiManagerCtl::new();
@@ -357,6 +366,8 @@ mod tests {
 
     #[test]
     fn test_start_dhcp_server_success() {
+        init_logger();
+
         let mock_iw_link = MockIwLinkHandler::new();
         let mut mock_dhcp_server = MockDhcpServerCtl::new();
         let mock_wifi_manager = MockWifiManagerCtl::new();

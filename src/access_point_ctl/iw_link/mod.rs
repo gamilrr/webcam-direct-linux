@@ -139,13 +139,13 @@ mod tests {
     use super::*;
     use crate::error::Result;
 
-    fn init() {
+    fn init_logger() {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
     #[test]
     fn test_create_new_link_error() -> Result<()> {
-        init();
+        init_logger();
         let mut mock_driver = MockWirelessDriver::new();
 
         mock_driver
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_create_new_link_success() -> Result<()> {
-        init();
+        init_logger();
         let mut mock_driver = MockWirelessDriver::new();
 
         mock_driver
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_add_ipv4_addr_success() -> Result<()> {
-        init();
+        init_logger();
         let mut mock_driver = MockWirelessDriver::new();
 
         mock_driver
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_add_ipv4_addr_error() -> Result<()> {
-        init();
+        init_logger();
         let mut mock_driver = MockWirelessDriver::new();
 
         mock_driver
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_create_new_link_twice() -> Result<()> {
-        init();
+        init_logger();
         let mut mock_driver = MockWirelessDriver::new();
 
         mock_driver

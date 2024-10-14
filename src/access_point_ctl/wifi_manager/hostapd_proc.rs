@@ -112,6 +112,7 @@ wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 ieee80211n=1
 wmm_enabled=1
+ignore_broadcast_ssid=2
 "#,
             control_dir, iw_name, creds.ssid, creds.password
         );
@@ -155,8 +156,13 @@ mod tests {
     };
     use anyhow::anyhow;
 
+    fn init_logger() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     #[test]
     fn test_hostapd_proc_start() {
+        init_logger();
         let mut mock_file_hdl = MockFileHdlOps::new();
         let mut mock_process_hdl = MockProcessHdlOps::new();
 
@@ -197,6 +203,7 @@ mod tests {
 
     #[test]
     fn test_hostapd_proc_start_fail_open() {
+        init_logger();
         let mut mock_file_hdl = MockFileHdlOps::new();
         let mock_process_hdl = MockProcessHdlOps::new();
 
@@ -222,6 +229,7 @@ mod tests {
 
     #[test]
     fn test_hostapd_proc_start_fail_write() {
+        init_logger();
         let mut mock_file_hdl = MockFileHdlOps::new();
         let mock_process_hdl = MockProcessHdlOps::new();
 
@@ -248,6 +256,7 @@ mod tests {
 
     #[test]
     fn test_hostapd_proc_start_fail_spawn() {
+        init_logger();
         let mut mock_file_hdl = MockFileHdlOps::new();
         let mut mock_process_hdl = MockProcessHdlOps::new();
 
@@ -288,6 +297,7 @@ mod tests {
 
     #[test]
     fn test_hostapd_proc_stop() {
+        init_logger();
         let mut mock_process_hdl = MockProcessHdlOps::new();
 
         // Set expectations

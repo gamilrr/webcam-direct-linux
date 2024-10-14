@@ -97,8 +97,13 @@ mod tests {
     use super::DhcpIpRange;
     use super::*;
 
+    fn init_logger() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     #[test]
     fn test_start_dnsmasq() {
+        init_logger();
         let mut mock_process = MockProcessHdlOps::new();
         let iw_name = "test_interface";
         let ip_range =
@@ -132,6 +137,7 @@ mod tests {
 
     #[test]
     fn test_start_dnsmasq_spawn_fails() {
+        init_logger();
         let mut mock_process = MockProcessHdlOps::new();
         let iw_name = "test_interface";
         let ip_range =
@@ -152,6 +158,7 @@ mod tests {
 
     #[test]
     fn test_stop_dnsmasq() {
+        init_logger();
         let mut mock_process = MockProcessHdlOps::new();
 
         // Expect the kill method to be called and return Ok
@@ -166,6 +173,7 @@ mod tests {
 
     #[test]
     fn test_stop_dnsmasq_kill_fails() {
+        init_logger();
         let mut mock_process = MockProcessHdlOps::new();
 
         // Expect the kill method to be called and return an error

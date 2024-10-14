@@ -157,8 +157,13 @@ mod tests {
     use std::path::PathBuf;
     use wpa_ctl::MockWpaCtlClientOps;
 
+    fn init_logger() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     #[test]
     fn test_config() {
+        init_logger();
         let mut mock_hostapd = MockHostapdProcCtl::new();
         let mut mock_wpa_ctl = MockWpaCtlClientOps::new();
 
@@ -180,6 +185,7 @@ mod tests {
 
     #[test]
     fn test_resume() {
+        init_logger();
         let mock_hostapd = MockHostapdProcCtl::new();
         let mut mock_wpa_ctl = MockWpaCtlClientOps::new();
 
@@ -192,6 +198,7 @@ mod tests {
 
     #[test]
     fn test_pause() {
+        init_logger();
         let mock_hostapd = MockHostapdProcCtl::new();
         let mut mock_wpa_ctl = MockWpaCtlClientOps::new();
 
@@ -204,6 +211,7 @@ mod tests {
 
     #[test]
     fn test_change_creds() {
+        init_logger();
         let mock_hostapd = MockHostapdProcCtl::new();
         let mut mock_wpa_ctl = MockWpaCtlClientOps::new();
 
@@ -222,6 +230,7 @@ mod tests {
 
     #[test]
     fn test_turnoff() {
+        init_logger();
         let mut mock_hostapd = MockHostapdProcCtl::new();
         let mut mock_wpa_ctl = MockWpaCtlClientOps::new();
 
@@ -235,6 +244,7 @@ mod tests {
 
     #[test]
     fn test_get_iw_name() {
+        init_logger();
         let mock_hostapd = MockHostapdProcCtl::new();
         let mut mock_wpa_ctl = MockWpaCtlClientOps::new();
 
