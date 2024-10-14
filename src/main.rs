@@ -10,7 +10,7 @@ use std::io::{self, Read};
 
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},
-    iw_link::{wdev_drv, IwLink},
+    iw_link::{wdev_drv, IwLink, IwLinkHandler},
     process_hdl::ProcessHdl,
     wifi_manager::{
         FileHdl, HostapdProc, WifiCredentials, WifiManager, WpaCtl,
@@ -22,49 +22,39 @@ use app_data_store::host_entity::ConnectionType;
 use error::Result;
 
 use tokio::io::AsyncBufReadExt;
+use webrtc::util::vnet::router;
 
 use crate::app_data_store::AppStore;
 use log::info;
 use provisioner::Provisioner;
 use sdp_exchanger::SdpExchanger;
 
-fn create_ap_controller() -> Result<impl AccessPointCtl> {
+fn setup_access_point() -> Result<impl AccessPointCtl> {
+    let if_name = "wcdirect0";
+
     //init the wireless interface handler---------
-    let link = IwLink::with_driver(wdev_drv::Nl80211Driver);
+    let link = IwLink::new(wdev_drv::Nl80211Driver, if_name)?;
 
     //init the dhcp server---------
     let dhcp_server_proc = DnsmasqProc::new(ProcessHdl::handler());
-
-    //init the wifi manager---------
 
     //wifi manager process
     let hostapd_proc = HostapdProc::new(
         FileHdl::from_path("/tmp/hostapd.conf"),
         ProcessHdl::handler(),
     );
-    let if_name = "wcdirect0";
-    let wifi_manager =
-        WifiManager::new(hostapd_proc, WpaCtl::new("/tmp/hostapd", if_name));
 
-    //init Access Point manager------
-    let mut ap_controller =
-        ApController::new(link, dhcp_server_proc, wifi_manager);
+    let wpactrl = WpaCtl::new("/tmp/hostapd", if_name);
 
-    //init network interface
-    let dhcp_ips = DhcpIpRange::new("193.168.3.5", "193.168.3.150")?;
-    let router_ip = dhcp_ips.get_router_ip();
-
-    //init wifi credentials
     let creds = WifiCredentials {
-        ssid: String::from("WebcamDirect"),
-        password: String::from("12345678"),
+        ssid: "WebcamDirect".to_string(),
+        password: "12345678".to_string(),
     };
 
-    ap_controller.configure(creds, &router_ip)?;
+    let wifi_manager = WifiManager::new(&creds, hostapd_proc, wpactrl)?;
 
-    ap_controller.start_dhcp_server(dhcp_ips)?;
-
-    Ok(ap_controller)
+    //init Access Point manager------
+    Ok(ApController::new(link, dhcp_server_proc, wifi_manager))
 }
 
 #[tokio::main]
@@ -73,7 +63,10 @@ async fn main() -> Result<()> {
 
     info!("Starting webcam direct");
 
-    let mut ap_controller = create_ap_controller()?;
+    let mut ap_controller = setup_access_point()?;
+
+    ap_controller
+        .start_dhcp_server(DhcpIpRange::new("193.168.3.5", "193.168.3.150")?)?;
 
     ap_controller.start_wifi()?;
 
