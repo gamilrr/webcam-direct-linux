@@ -104,10 +104,10 @@ impl WpaCtl {
     ///
     /// * `control_dir` - Path to the control directory.
     /// * `iw_name` - Interface name.
-    pub fn new(control_dir: &str, iw_name: &str) -> Self {
+    pub fn new<P: AsRef<Path>>(control_dir: P, iw_name: &str) -> Self {
         Self {
             client: None,
-            control_dir: control_dir.into(),
+            control_dir: control_dir.as_ref().to_path_buf(),
             iw_name: iw_name.to_string(),
         }
     }

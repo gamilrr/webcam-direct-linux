@@ -6,11 +6,10 @@ pub mod iw_link;
 pub mod process_hdl;
 pub mod wifi_manager;
 
-use anyhow::anyhow;
 use dhcp_server::DhcpIpRange;
 use dhcp_server::DhcpServerCtl;
 use iw_link::IwLinkHandler;
-use log::{error, info, warn};
+use log::{error, info};
 use wifi_manager::WifiCredentials;
 use wifi_manager::WifiManagerCtl;
 
@@ -18,20 +17,6 @@ use crate::error::Result;
 
 /// Trait defining the control operations for an access point.
 pub trait AccessPointCtl {
-    /// Configures the access point with the given WiFi credentials and route IP.
-    ///
-    /// # Arguments
-    ///
-    /// * `creds` - WiFi credentials to configure the access point.
-    /// * `route_ip` - IP address to route the access point.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<()>` - Result indicating success or failure.
-    fn configure(
-        &mut self, creds: WifiCredentials, route_ip: &str,
-    ) -> Result<()>;
-
     /// Starts the WiFi broadcast.
     ///
     /// # Returns
@@ -86,7 +71,6 @@ where
     iw_link: I,
     dhcp_server: D,
     wifi_manager: W,
-    if_name: Option<String>,
     creds: Option<WifiCredentials>,
 }
 
@@ -105,73 +89,13 @@ impl<I: IwLinkHandler, D: DhcpServerCtl, W: WifiManagerCtl>
     ///
     /// * `Self` - New instance of `ApController`.
     pub fn new(iw_link: I, dhcp_server: D, wifi_manager: W) -> Self {
-        Self { iw_link, wifi_manager, dhcp_server, if_name: None, creds: None }
+        Self { iw_link, wifi_manager, dhcp_server, creds: None }
     }
 }
 
 impl<I: IwLinkHandler, D: DhcpServerCtl, W: WifiManagerCtl> AccessPointCtl
     for ApController<I, D, W>
 {
-    fn configure(
-        &mut self, creds: WifiCredentials, route_ip: &str,
-    ) -> Result<()> {
-        let if_name = self.wifi_manager.get_iw_name().to_string();
-
-        info!("Configuring access point with name {}", if_name);
-
-        if let Err(error) = self.iw_link.create_with_name(&if_name) {
-            error!(
-                "Failed to create wireless interface with name {}, error {}",
-                if_name, error
-            );
-            return Err(error);
-        };
-
-        // In ubuntu the network manager will try to take control of the interface causing a
-        // hostapd to fail to start. We need to disable the network manager for the interface
-        if let Ok(_) = std::process::Command::new("nmcli")
-            .arg("device")
-            .arg("set")
-            .arg(&if_name)
-            .arg("managed")
-            .arg("no")
-            .output()
-        {
-            info!("Network manager disabled for interface {}", if_name);
-        } else {
-            warn!(
-                "Failed to disable network manager for interface {}",
-                if_name
-            );
-        }
-
-        if let Err(error) = self.iw_link.add_ipv4_addr(route_ip) {
-            error!(
-                "Failed to add IP address {} to interface {}, error {}",
-                route_ip, if_name, error
-            );
-            return Err(error);
-        }
-
-        if let Err(error) = self.wifi_manager.configure(creds.clone()) {
-            error!(
-                "Failed to configure wifi manager with credentials {:?}, error {}",
-                creds, error
-            );
-            return Err(error);
-        }
-
-        info!("Access Point configured successfully, pausing the wifi broadcast for now");
-        if let Err(error) = self.wifi_manager.pause() {
-            warn!("Failed to pause the wifi broadcast, error {}", error);
-        }
-
-        self.creds = Some(creds);
-        self.if_name = Some(if_name.to_string());
-
-        Ok(())
-    }
-
     fn start_wifi(&mut self) -> Result<()> {
         info!("Resuming the wifi broadcast");
         if let Err(error) = self.wifi_manager.resume() {
@@ -209,14 +133,14 @@ impl<I: IwLinkHandler, D: DhcpServerCtl, W: WifiManagerCtl> AccessPointCtl
     fn start_dhcp_server(&mut self, ip_range: DhcpIpRange) -> Result<()> {
         info!("Starting DHCP server with IP range {:?}", ip_range);
 
-        if let Some(if_name) = &self.if_name {
-            if let Err(error) = self.dhcp_server.start(if_name, ip_range) {
-                error!("Failed to start DHCP server, error {}", error);
-                return Err(error);
-            }
-        } else {
-            error!("The wireless interface not available");
-            return Err(anyhow!("The wireless interface name not available"));
+        let router_ip = ip_range.get_router_ip();
+        self.iw_link.add_ipv4_addr(&router_ip)?;
+
+        let if_name = self.iw_link.get_if_name();
+
+        if let Err(error) = self.dhcp_server.start(if_name, ip_range) {
+            error!("Failed to start DHCP server, error {}", error);
+            return Err(error);
         }
 
         Ok(())
@@ -234,46 +158,6 @@ mod tests {
 
     fn init_logger() {
         let _ = env_logger::builder().is_test(true).try_init();
-    }
-
-    #[test]
-    fn test_configure_success() {
-        init_logger();
-        let mut mock_iw_link = MockIwLinkHandler::new();
-        let mock_dhcp_server = MockDhcpServerCtl::new();
-        let mut mock_wifi_manager = MockWifiManagerCtl::new();
-
-        mock_wifi_manager
-            .expect_get_iw_name()
-            .return_const("wlan0".to_string());
-        mock_iw_link
-            .expect_create_with_name()
-            .with(eq("wlan0"))
-            .returning(|_| Ok(()));
-        mock_iw_link
-            .expect_add_ipv4_addr()
-            .with(eq("192.168.1.1"))
-            .returning(|_| Ok(()));
-        mock_wifi_manager
-            .expect_configure()
-            .withf(|creds| {
-                creds.ssid == "test_ssid" && creds.password == "test_password"
-            })
-            .returning(|_| Ok(()));
-        mock_wifi_manager.expect_pause().returning(|| Ok(()));
-
-        let mut controller = ApController::new(
-            mock_iw_link,
-            mock_dhcp_server,
-            mock_wifi_manager,
-        );
-        let creds = WifiCredentials {
-            ssid: "test_ssid".to_string(),
-            password: "test_password".to_string(),
-        };
-
-        let result = controller.configure(creds, "192.168.1.1");
-        assert!(result.is_ok());
     }
 
     #[test]
@@ -333,6 +217,7 @@ mod tests {
             mock_dhcp_server,
             mock_wifi_manager,
         );
+
         let creds = WifiCredentials {
             ssid: "new_ssid".to_string(),
             password: "new_password".to_string(),
@@ -354,6 +239,7 @@ mod tests {
             mock_dhcp_server,
             mock_wifi_manager,
         );
+
         let creds = WifiCredentials {
             ssid: "test_ssid".to_string(),
             password: "test_password".to_string(),
@@ -368,7 +254,7 @@ mod tests {
     fn test_start_dhcp_server_success() {
         init_logger();
 
-        let mock_iw_link = MockIwLinkHandler::new();
+        let mut mock_iw_link = MockIwLinkHandler::new();
         let mut mock_dhcp_server = MockDhcpServerCtl::new();
         let mock_wifi_manager = MockWifiManagerCtl::new();
 
@@ -381,12 +267,14 @@ mod tests {
             })
             .returning(|_, _| Ok(()));
 
+        mock_iw_link.expect_add_ipv4_addr().returning(|_| Ok(()));
+        mock_iw_link.expect_get_if_name().return_const("wlan0".to_string());
+
         let mut controller = ApController::new(
             mock_iw_link,
             mock_dhcp_server,
             mock_wifi_manager,
         );
-        controller.if_name = Some("wlan0".to_string());
 
         let ip_range =
             DhcpIpRange::new("192.168.1.100", "192.168.1.200").unwrap();

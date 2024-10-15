@@ -4,7 +4,7 @@
 use super::super::process_hdl::ProcessHdlOps;
 use super::file_hdl::FileHdlOps;
 use crate::error::Result;
-use log::info;
+use log::{info, warn};
 use std::process::Command;
 
 #[cfg(test)]
@@ -38,7 +38,7 @@ pub trait HostapdProcCtl {
     ///
     /// * `Result<()>` - Returns Ok(()) if the process starts successfully, otherwise returns an error.
     fn start(
-        &mut self, creds: WifiCredentials, iw_name: &str, control_dir: &str,
+        &mut self, creds: &WifiCredentials, iw_name: &str, control_dir: &str,
     ) -> Result<()>;
 
     /// Stop the Hostapd process.
@@ -93,7 +93,7 @@ impl<P: ProcessHdlOps, F: FileHdlOps> HostapdProcCtl for HostapdProc<P, F> {
     ///
     /// * `Result<()>` - Returns Ok(()) if the process starts successfully, otherwise returns an error.
     fn start(
-        &mut self, creds: WifiCredentials, iw_name: &str, control_dir: &str,
+        &mut self, creds: &WifiCredentials, iw_name: &str, control_dir: &str,
     ) -> Result<()> {
         // Create the hostapd config file
         self.config_file.open()?;
@@ -112,7 +112,6 @@ wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 ieee80211n=1
 wmm_enabled=1
-ignore_broadcast_ssid=2
 "#,
             control_dir, iw_name, creds.ssid, creds.password
         );
@@ -125,6 +124,24 @@ ignore_broadcast_ssid=2
         // Create the Unix socket upfront to avoid busy-waiting
         let mut cmd = Command::new("hostapd");
         cmd.arg(self.config_file.get_path());
+
+        // In ubuntu the network manager will try to take control of the interface causing a
+        // hostapd to fail to start. We need to disable the network manager for the interface
+        if let Ok(_) = std::process::Command::new("nmcli")
+            .arg("device")
+            .arg("set")
+            .arg(&iw_name)
+            .arg("managed")
+            .arg("no")
+            .output()
+        {
+            info!("Network manager disabled for interface {}", iw_name);
+        } else {
+            warn!(
+                "Failed to disable network manager for interface {}",
+                iw_name
+            );
+        }
 
         // Spawn the hostapd process
         self.process.spawn(&mut cmd)?;
@@ -189,13 +206,14 @@ mod tests {
 
         let mut hostapd_proc =
             HostapdProc::new(mock_file_hdl, mock_process_hdl);
+
         let creds = WifiCredentials {
             ssid: "test_ssid".to_string(),
             password: "test_password".to_string(),
         };
 
         // Call the start method
-        let result = hostapd_proc.start(creds, "wlan0", "/var/run/hostapd");
+        let result = hostapd_proc.start(&creds, "wlan0", "/var/run/hostapd");
 
         // Assert that the method returns Ok(())
         assert!(result.is_ok());
@@ -221,7 +239,7 @@ mod tests {
         };
 
         // Call the start method
-        let result = hostapd_proc.start(creds, "wlan0", "/var/run/hostapd");
+        let result = hostapd_proc.start(&creds, "wlan0", "/var/run/hostapd");
 
         // Assert that the method returns an error
         assert!(result.is_err());
@@ -248,7 +266,7 @@ mod tests {
         };
 
         // Call the start method
-        let result = hostapd_proc.start(creds, "wlan0", "/var/run/hostapd");
+        let result = hostapd_proc.start(&creds, "wlan0", "/var/run/hostapd");
 
         // Assert that the method returns an error
         assert!(result.is_err());
@@ -289,7 +307,7 @@ mod tests {
         };
 
         // Call the start method
-        let result = hostapd_proc.start(creds, "wlan0", "/var/run/hostapd");
+        let result = hostapd_proc.start(&creds, "wlan0", "/var/run/hostapd");
 
         // Assert that the method returns an error
         assert!(result.is_err());
