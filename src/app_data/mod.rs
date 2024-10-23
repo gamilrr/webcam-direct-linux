@@ -11,12 +11,16 @@ use log::error;
 use log::info;
 use schemas::ConnectionType;
 use schemas::HostSchema;
-use schemas::MobileSchema;
+pub use schemas::{MobileSchema, MobileId};
 use uuid::Uuid;
 
 use crate::error::Result;
 
+#[cfg(test)]
+use mockall::automock;
+
 /// A trait that defines the operations for interacting with the application's data store.
+#[cfg_attr(test, automock)]
 pub trait AppDataStore {
     /// Retrieves the host name from the data store.
     ///

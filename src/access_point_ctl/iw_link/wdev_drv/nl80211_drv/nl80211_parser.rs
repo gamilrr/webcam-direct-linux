@@ -46,12 +46,14 @@ pub fn parse_nl80211_payload(
         match attr.nla_type.nla_type {
             //get index
             Nl80211Attribute::Wiphy => {
-                props.phy_idx = Some(InterfaceIndex(attr.get_payload_as::<u16>()?));
+                props.phy_idx =
+                    Some(InterfaceIndex(attr.get_payload_as::<u16>()?));
                 info!("Phy index: {:?}", props.phy_idx);
             }
 
             Nl80211Attribute::Ifindex => {
-                props.if_idx = Some(InterfaceIndex(attr.get_payload_as::<u16>()?));
+                props.if_idx =
+                    Some(InterfaceIndex(attr.get_payload_as::<u16>()?));
                 info!("Interface index: {:?}", props.if_idx);
             }
 

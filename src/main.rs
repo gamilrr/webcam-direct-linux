@@ -3,6 +3,7 @@ mod app_data;
 mod app_data_store;
 mod error;
 mod gatt_const;
+mod ble_ctl;
 mod provisioner;
 mod sdp_exchanger;
 
@@ -21,6 +22,7 @@ use app_data::HostInfo;
 use app_data_store::host_entity::ConnectionType;
 use error::Result;
 
+use ble_ctl::ble_events::device_props::device_props;
 use tokio::io::AsyncBufReadExt;
 use webrtc::util::vnet::router;
 
@@ -63,12 +65,12 @@ async fn main() -> Result<()> {
 
     info!("Starting webcam direct");
 
-    let mut ap_controller = setup_access_point()?;
+    // let mut ap_controller = setup_access_point()?;
 
-    ap_controller
-        .start_dhcp_server(DhcpIpRange::new("193.168.3.5", "193.168.3.150")?)?;
+    //ap_controller
+    //    .start_dhcp_server(DhcpIpRange::new("193.168.3.5", "193.168.3.150")?)?;
 
-    ap_controller.start_wifi()?;
+    //ap_controller.start_wifi()?;
 
     let session = bluer::Session::new().await?;
 
@@ -81,11 +83,14 @@ async fn main() -> Result<()> {
     info!("Webcam direct started");
     // let mut sdp_exchanger =
     //     SdpExchanger::new(adapter.clone(), app_store.clone());
+
     let mut provisioner = Provisioner::new(adapter.clone(), app_store.clone());
 
     provisioner.start_provisioning().await?;
 
     //sdp_exchanger.start().await?;
+
+    device_props(adapter.clone()).await?;
 
     info!("Service ready. Press enter to quit.");
     let stdin = tokio::io::BufReader::new(tokio::io::stdin());
@@ -96,11 +101,6 @@ async fn main() -> Result<()> {
     //sdp_exchanger.stop().await?;
 
     info!("webcam direct stopped stopped");
-
-    info!("Service ready. Press enter to quit.");
-    let stdin = tokio::io::BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-    let _ = lines.next_line().await;
 
     Ok(())
 }

@@ -38,4 +38,5 @@ pub trait WirelessDriver {
 
     /// Deletes the link with the given interface index.
     fn delete_link(&self, ifindex: InterfaceIndex) -> Result<()>;
+
 }
