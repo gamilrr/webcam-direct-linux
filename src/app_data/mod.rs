@@ -10,8 +10,8 @@ use kv_db::KvDbOps;
 use log::error;
 use log::info;
 use schemas::ConnectionType;
-use schemas::HostSchema;
-pub use schemas::{MobileSchema, MobileId};
+pub use schemas::HostSchema;
+pub use schemas::{MobileId, MobileSchema};
 use uuid::Uuid;
 
 use crate::error::Result;

@@ -3,7 +3,7 @@ mod app_data;
 mod app_data_store;
 mod error;
 mod gatt_const;
-mod ble_ctl;
+mod ble;
 mod provisioner;
 mod sdp_exchanger;
 
@@ -22,7 +22,7 @@ use app_data::HostInfo;
 use app_data_store::host_entity::ConnectionType;
 use error::Result;
 
-use ble_ctl::ble_events::device_props::device_props;
+use ble::ble_clients::device_props::device_props;
 use tokio::io::AsyncBufReadExt;
 use webrtc::util::vnet::router;
 
