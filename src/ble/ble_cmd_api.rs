@@ -5,32 +5,33 @@ use crate::app_data::{HostSchema, MobileSchema};
 pub type Address = String;
 pub type Responder<T> = oneshot::Sender<T>;
 
-//Ble Server-Client request
-//the response is optionally requested
-
+//Generic Command and Query strcuts
+//Query will get the state value
 #[derive(Debug)]
-pub enum BleCmdApi {
-    //Mobile Connection status
-    MobileConnected {
-        addr: Address,
-        resp: Option<Responder<Address>>,
-    },
+pub struct BleQuery<T> {
+    pub addr: Address,
+    pub resp: Responder<T>,
+}
 
-    MobileDisconnected {
-        addr: Address,
-        resp: Option<Responder<Address>>,
-    },
+//Command will modify the state
+#[derive(Debug)]
+pub struct BleCmd<T> {
+    pub addr: Address,
+    pub payload: T,
+}
+
+//Ble Server-Client request
+#[derive(Debug)]
+pub enum BleApi {
+    //Mobile Connection status
+    MobileDisconnected(BleCmd<Address>),
 
     //Register mobile
-    RegisterMobile {
-        addr: Address,
-        payload: MobileSchema,
-        resp: Option<Responder<Address>>,
-    },
+    RegisterMobile(BleCmd<MobileSchema>),
+
+    //Get mobile info
+    MobileInfo(BleQuery<MobileSchema>),
 
     //Read host info
-    HostInfo {
-        addr: Address,
-        resp: Responder<HostSchema>,
-    },
+    HostInfo(BleQuery<HostSchema>),
 }
