@@ -1,4 +1,4 @@
-use log::info;
+use log::{error, info};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
 
@@ -35,7 +35,9 @@ impl BleServer {
             loop {
                 tokio::select! {
                     Some(req) = ble_rx.recv() => {
-                        Self::handle_request(&mut dev_service, req);
+                       if let Err(e) = Self::handle_request(&mut dev_service, req){
+                           error!("Error handling request: {:?}", e);
+                       }
                     }
                     _ = &mut drop_rx => {
                         info!("MobileManager task is stopping");
@@ -49,8 +51,8 @@ impl BleServer {
     }
 
     fn handle_request(
-        mobile_mgr: &mut impl DevicesStatusService, req: BleCmdApi,
-    ) {
+        device_service: &mut impl DevicesStatusService, req: BleCmdApi,
+    ) -> Result<()> {
         match req {
             BleCmdApi::MobileConnected { addr, resp } => {
                 info!("Mobile connected: {:?}", addr);
@@ -64,10 +66,17 @@ impl BleServer {
                     let _ = tx.send(addr);
                 }
             }
+
+            BleCmdApi::HostInfo { addr, resp } => {
+                info!("Host info requested by: {:?}", addr);
+                resp.send(device_service.get_host_info()?);
+            }
             _ => {
                 info!("Unhandled event: {:?}", req);
             }
-        }
+        };
+
+        Ok(())
     }
 
     pub fn get_ble_tx(&self) -> Sender<BleCmdApi> {
@@ -78,7 +87,6 @@ impl BleServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_data::MockAppDataStore;
 
     fn init_logger() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -87,7 +95,5 @@ mod tests {
     #[tokio::test]
     async fn test_mobile_manager() {
         init_logger();
-
-        let app_data = MockAppDataStore::new();
     }
 }
