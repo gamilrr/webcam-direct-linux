@@ -22,7 +22,7 @@ use app_data::HostInfo;
 use app_data_store::host_entity::ConnectionType;
 use error::Result;
 
-use ble::ble_clients::device_props::device_props;
+use ble::ble_clients::provisioner::provisioner;
 use tokio::io::AsyncBufReadExt;
 use webrtc::util::vnet::router;
 
@@ -72,32 +72,34 @@ async fn main() -> Result<()> {
 
     //ap_controller.start_wifi()?;
 
-    let session = bluer::Session::new().await?;
+//    let session = bluer::Session::new().await?;
 
-    let adapter = session.default_adapter().await?;
+ //   let adapter = session.default_adapter().await?;
 
-    adapter.set_powered(true).await?;
+  //  adapter.set_powered(true).await?;
 
-    let app_store = AppStore::new("webcam-direct-config.json").await;
+//    let app_store = AppStore::new("webcam-direct-config.json").await;
 
-    info!("Webcam direct started");
+//    info!("Webcam direct started");
     // let mut sdp_exchanger =
     //     SdpExchanger::new(adapter.clone(), app_store.clone());
 
-    let mut provisioner = Provisioner::new(adapter.clone(), app_store.clone());
+//    let mut provisioner = Provisioner::new(adapter.clone(), app_store.clone());
 
-    provisioner.start_provisioning().await?;
+//    provisioner.start_provisioning().await?;
 
     //sdp_exchanger.start().await?;
 
-    device_props(adapter.clone()).await?;
+//    device_props(adapter.clone()).await?;
+//
+    provisioner().await?;
 
     info!("Service ready. Press enter to quit.");
     let stdin = tokio::io::BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
     let _ = lines.next_line().await;
 
-    provisioner.stop_provisioning();
+    //provisioner.stop_provisioning();
     //sdp_exchanger.stop().await?;
 
     info!("webcam direct stopped stopped");
