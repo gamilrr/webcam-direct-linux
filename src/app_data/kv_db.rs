@@ -62,7 +62,7 @@ pub trait SchemaType {
 
 /// A trait defining operations for a key-value database.
 #[cfg_attr(test, automock)]
-pub trait KvDbOps {
+pub trait KvDbOps: Send + Sync + 'static {
     /// Adds an item to the database.
     ///
     /// # Arguments

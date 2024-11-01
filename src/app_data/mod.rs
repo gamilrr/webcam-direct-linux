@@ -11,38 +11,12 @@ use log::error;
 use log::info;
 use schemas::ConnectionType;
 pub use schemas::HostSchema;
-pub use schemas::{MobileId, MobileSchema};
+pub use schemas::MobileSchema;
 use uuid::Uuid;
 
+use crate::ble::AppDataStore;
+use crate::ble::HostProvInfo;
 use crate::error::Result;
-
-#[cfg(test)]
-use mockall::automock;
-
-/// A trait that defines the operations for interacting with the application's data store.
-#[cfg_attr(test, automock)]
-pub trait AppDataStore {
-    /// Retrieves the host name from the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn get_host_name(&self) -> Result<String>;
-
-    /// Retrieves the host ID from the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn get_host_id(&self) -> Result<String>;
-
-    /// Adds a mobile device to the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn add_mobile(&mut self, mobile: &MobileSchema) -> Result<()>;
-}
 
 /// A struct that holds the application's data store.
 pub struct AppData<Db> {
@@ -89,6 +63,24 @@ impl<Db> AppDataStore for AppData<Db>
 where
     Db: KvDbOps,
 {
+    fn get_host_prov_info(&self) -> Result<HostProvInfo> {
+        if let Some(host) = self.data_db.read::<HostSchema>("host_info")? {
+            info!("Host info retrieved successfully.");
+            return Ok(HostProvInfo {
+                id: host.id,
+                name: host.name,
+                connection_type: if host.connection_type == ConnectionType::WLAN
+                {
+                    "WLAN".to_string()
+                } else {
+                    "AP".to_string()
+                },
+            });
+        }
+        error!("Failed to retrieve host info: Host info not found.");
+        Err(anyhow!("Host info not found"))
+    }
+
     fn get_host_name(&self) -> Result<String> {
         if let Some(host) = self.data_db.read::<HostSchema>("host_info")? {
             info!("Host name retrieved successfully.");

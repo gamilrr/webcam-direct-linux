@@ -39,7 +39,7 @@ impl SchemaType for MobileSchema {
 pub type HostId = String;
 
 /// Enum representing the type of connection for a host.
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 pub enum ConnectionType {
     #[default]
     WLAN,

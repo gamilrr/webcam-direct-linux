@@ -16,9 +16,9 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
     fn set_register_mobile(
         &mut self, addr: String, data: BleBuffer,
     ) -> Result<()>;
-    fn get_host_info(&self, addr: String, max_size: usize)
+    fn get_host_info(&mut self, addr: String, max_size: usize)
         -> Result<BleBuffer>;
-    fn device_disconnected(&self, addr: String) -> Result<()>;
+    fn device_disconnected(&mut self, addr: String) -> Result<()>;
 }
 
 pub struct BleServer {
