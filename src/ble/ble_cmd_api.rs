@@ -1,17 +1,10 @@
 use tokio::sync::oneshot;
 
-use crate::app_data::{HostSchema, MobileSchema};
-
 pub type Address = String;
+pub type BleBuffer = Vec<u8>;
 pub type Responder<T> = oneshot::Sender<T>;
 
 use crate::error::Result;
-
-#[derive(Debug)]
-pub struct BleBuffer {
-    pub remain_len: usize,
-    pub payload: Vec<u8>,
-}
 
 #[derive(Debug)]
 pub struct BleQuery {

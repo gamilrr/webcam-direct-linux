@@ -15,6 +15,12 @@ use crate::{app_data::MobileSchema, error::Result};
 use mockall::automock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct BufferComm {
+    pub remain_len: usize,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostProvInfo {
     pub id: String,
     pub name: String,
@@ -56,7 +62,7 @@ enum MobileDataState {
         remain_len: usize,
     },
     WritingMobileInfo {
-        current_buffer: Vec<u8>,
+        current_buffer: BleBuffer,
     },
 
     #[default]
@@ -109,14 +115,15 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
-            current_buffer.extend_from_slice(&data.payload);
+            let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
 
-            if data.remain_len == 0 {
+            current_buffer.extend_from_slice(&buff_comm.payload);
+
+            if buff_comm.remain_len == 0 {
                 let mobile =
                     serde_json::from_slice::<MobileSchema>(&current_buffer)?;
                 self.db.add_mobile(&mobile)?;
                 info!("Mobile registered: {:?}", mobile);
-                return Ok(());
             }
         }
 
@@ -146,21 +153,21 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
-            if *remain_len <= max_buffer_len {
-                return Ok(BleBuffer {
-                    remain_len: 0,
-                    payload: self.host_info.clone(),
-                });
-            }
-
             let initial_len = total_len - *remain_len;
-            let payload = self.host_info.clone()
-                [initial_len..initial_len + max_buffer_len]
-                .to_vec();
 
-            *remain_len -= max_buffer_len;
+            let end_len = if max_buffer_len >= *remain_len {
+                *remain_len = 0;
+                total_len
+            } else {
+                *remain_len -= max_buffer_len;
+                initial_len + max_buffer_len
+            };
 
-            return Ok(BleBuffer { remain_len: *remain_len, payload });
+            let payload = self.host_info.clone()[initial_len..end_len].to_vec();
+
+            let ble_buffer = BufferComm { remain_len: *remain_len, payload };
+
+            return Ok(serde_json::to_vec(&ble_buffer)?);
         }
 
         Err(anyhow!("Mobile is not reading host info"))

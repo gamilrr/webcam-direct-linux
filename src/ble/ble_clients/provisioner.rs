@@ -1,28 +1,19 @@
 //! Serves a Bluetooth GATT application using the IO programming model.
 use bluer::{
     adv::{Advertisement, AdvertisementHandle},
-    gatt::{
-        local::{
-            characteristic_control, service_control, Application,
-            ApplicationHandle, Characteristic, CharacteristicControlEvent,
-            CharacteristicNotify, CharacteristicNotifyMethod,
-            CharacteristicRead, CharacteristicWrite, CharacteristicWriteMethod,
-            Service,
-        },
-        CharacteristicReader, CharacteristicWriter,
+    gatt::local::{
+        Application, ApplicationHandle, Characteristic, CharacteristicRead,
+        CharacteristicWrite, CharacteristicWriteMethod, ReqError, Service,
     },
     Adapter,
 };
 use futures::FutureExt;
-use log::info;
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    sync::{mpsc, oneshot},
-};
+use log::{error, info};
+use tokio::sync::oneshot;
 
 use crate::{
     ble::{
-        ble_cmd_api::{self, BleApi},
+        ble_cmd_api::{self, BleApi, BleBuffer, BleCmd, BleQuery},
         ble_server::ServerConn,
     },
     gatt_const::{
@@ -36,12 +27,14 @@ pub struct ProvisionerClient {
 }
 
 impl ProvisionerClient {
-    pub fn new(ble_adapter: Adapter, server_conn: ServerConn) -> Self {
+    pub fn new(
+        ble_adapter: Adapter, server_conn: ServerConn, host_name: String,
+    ) -> Self {
         let (tx, rx) = oneshot::channel();
 
         tokio::spawn(async move {
             if let Ok((_adv_handle, _app_handle)) =
-                provisioner(ble_adapter, server_conn).await
+                provisioner(ble_adapter, server_conn, host_name).await
             {
                 info!("Provisioner started");
 
@@ -56,7 +49,7 @@ impl ProvisionerClient {
 }
 
 pub async fn provisioner(
-    adapter: Adapter, server_conn: ServerConn,
+    adapter: Adapter, server_conn: ServerConn, host_name: String,
 ) -> bluer::Result<(AdvertisementHandle, ApplicationHandle)> {
     info!(
         "Advertising on Bluetooth adapter {} with address {}",
@@ -66,7 +59,7 @@ pub async fn provisioner(
     let le_advertisement = Advertisement {
         service_uuids: vec![PROV_SERV_HOST_UUID].into_iter().collect(),
         discoverable: Some(true),
-        local_name: Some("gatt_server".to_string()),
+        local_name: Some(host_name),
         ..Default::default()
     };
     let adv_handle = adapter.advertise(le_advertisement).await?;
@@ -93,27 +86,31 @@ pub async fn provisioner(
                             //prepare the cmd to send to the server
                             let (tx, rx) = oneshot::channel();
 
-                            let cmd = BleApi::HostInfo(ble_cmd_api::BleQuery {
+                            let req = BleApi::HostInfo(BleQuery {
                                 addr: req.device_address.to_string(),
-                                max_buffer_len: 20,
+                                max_buffer_len: req.mtu as usize,
                                 resp: tx,
                             });
 
                             let reader_server_conn = reader_server_conn.clone();
 
                             async move {
-                                if let Err(e) =
-                                    reader_server_conn.send(cmd).await
+                                if let Ok(_) =
+                                    reader_server_conn.send(req).await
                                 {
-                                    info!(
-                                        "Error sending host info request: {:?}",
-                                        e
-                                    );
-                                }
+                                    if let Ok(resp) = rx.await {
+                                        if let Ok(resp) = resp {
+                                            return Ok(resp);
+                                        } else {
+                                            error!("Error reading host info");
+                                        }
+                                        error!( "Error receiving host info response");
+                                    }
+                                }                                     
 
-                                let _ = rx.await;
+                                error!("Error sending host info request");
 
-                                Ok(vec![])
+                                Err(ReqError::Failed)
                             }
                             .boxed()
                         }),
@@ -133,30 +130,34 @@ pub async fn provisioner(
                                     &new_value, req.device_address
                                 );
 
-                                //prepare the cmd to send to the server
+                                //prepare the request to send to the server
                                 let (tx, rx) = oneshot::channel();
-
-                                let cmd = BleApi::RegisterMobile(
-                                    ble_cmd_api::BleCmd {
+                                let req = BleApi::RegisterMobile(BleCmd {
                                         addr: req.device_address.to_string(),
-                                        payload: ble_cmd_api::BleBuffer {
-                                            remain_len: new_value.len(),
-                                            payload: new_value,
-                                        },
+                                        payload: new_value,
                                         resp: tx,
                                     },
                                 );
 
                                 let writer_server_conn =
                                     writer_server_conn.clone();
+
                                 async move {
-                                    if let Err(e) = writer_server_conn.send(cmd).await {
-                                        info!("Error sending mobile registration request: {:?}", e);
-                                    }
+                                    if let Ok(_) = writer_server_conn.send(req).await {
 
-                                    let _ = rx.await;
+                                        if let Ok(resp) = rx.await {
+                                            if let Ok(_) = resp {
+                                                return Ok(());
+                                            } else {
+                                                error!("Error writing mobile info");
+                                            }
+                                            error!("Error sending mobile info");
+                                        }
+                                    } 
 
-                                    Ok(())
+                                    error!("Error sending mobile registration request");
+
+                                    Err(ReqError::Failed)
                                 }.boxed()
                             },
                         )),
