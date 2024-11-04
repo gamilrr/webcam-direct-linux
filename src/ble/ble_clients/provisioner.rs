@@ -1,28 +1,63 @@
 //! Serves a Bluetooth GATT application using the IO programming model.
-
 use bluer::{
-    adv::Advertisement,
+    adv::{Advertisement, AdvertisementHandle},
     gatt::{
         local::{
-            characteristic_control, service_control, Application, Characteristic, CharacteristicControlEvent, CharacteristicNotify, CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite, CharacteristicWriteMethod, Service
-        }, CharacteristicReader, CharacteristicWriter
+            characteristic_control, service_control, Application,
+            ApplicationHandle, Characteristic, CharacteristicControlEvent,
+            CharacteristicNotify, CharacteristicNotifyMethod,
+            CharacteristicRead, CharacteristicWrite, CharacteristicWriteMethod,
+            Service,
+        },
+        CharacteristicReader, CharacteristicWriter,
+    },
+    Adapter,
+};
+use futures::FutureExt;
+use log::info;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    sync::{mpsc, oneshot},
+};
+
+use crate::{
+    ble::{
+        ble_cmd_api::{self, BleApi},
+        ble_server::ServerConn,
+    },
+    gatt_const::{
+        PROV_CHAR_HOST_INFO_UUID, PROV_CHAR_MOBILE_INFO_UUID,
+        PROV_SERV_HOST_UUID,
     },
 };
-use futures::{future, pin_mut, FutureExt, StreamExt};
-use log::info;
-use std::{collections::BTreeMap, sync::{Arc, Mutex}, time::Duration};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    time::{interval, sleep},
-};
 
-use crate::gatt_const::{PROV_CHAR_HOST_INFO_UUID, PROV_CHAR_MOBILE_INFO_UUID, PROV_SERV_HOST_UUID};
+pub struct ProvisionerClient {
+    _tx_drop: oneshot::Sender<()>,
+}
 
-pub async fn provisioner() -> bluer::Result<()> {
-    let session = bluer::Session::new().await?;
-    let adapter = session.default_adapter().await?;
-    adapter.set_powered(true).await?;
+impl ProvisionerClient {
+    pub fn new(ble_adapter: Adapter, server_conn: ServerConn) -> Self {
+        let (tx, rx) = oneshot::channel();
 
+        tokio::spawn(async move {
+            if let Ok((_adv_handle, _app_handle)) =
+                provisioner(ble_adapter, server_conn).await
+            {
+                info!("Provisioner started");
+
+                let _ = rx.await;
+            } else {
+                info!("Provisioner failed to start");
+            }
+        });
+
+        Self { _tx_drop: tx }
+    }
+}
+
+pub async fn provisioner(
+    adapter: Adapter, server_conn: ServerConn,
+) -> bluer::Result<(AdvertisementHandle, ApplicationHandle)> {
     info!(
         "Advertising on Bluetooth adapter {} with address {}",
         adapter.name(),
@@ -37,7 +72,9 @@ pub async fn provisioner() -> bluer::Result<()> {
     let adv_handle = adapter.advertise(le_advertisement).await?;
 
     info!("Serving GATT service on Bluetooth adapter {}", adapter.name());
-    let counter = Arc::new(Mutex::new(0));
+
+    let reader_server_conn = server_conn.clone();
+    let writer_server_conn = server_conn.clone();
     let app = Application {
         services: vec![Service {
             uuid: PROV_SERV_HOST_UUID,
@@ -48,20 +85,41 @@ pub async fn provisioner() -> bluer::Result<()> {
                     read: Some(CharacteristicRead {
                         read: true,
                         fun: Box::new(move |req| {
-                                info!(
-                                    "Read request {:?} from {}",
-                                    &req,
-                                    req.device_address
-                                );
-                                async move {
-                                    Ok(vec![0x01, 0x02, 0x03])
+                            info!(
+                                "Read request {:?} from {}",
+                                &req, req.device_address
+                            );
+
+                            //prepare the cmd to send to the server
+                            let (tx, rx) = oneshot::channel();
+
+                            let cmd = BleApi::HostInfo(ble_cmd_api::BleQuery {
+                                addr: req.device_address.to_string(),
+                                max_buffer_len: 20,
+                                resp: tx,
+                            });
+
+                            let reader_server_conn = reader_server_conn.clone();
+
+                            async move {
+                                if let Err(e) =
+                                    reader_server_conn.send(cmd).await
+                                {
+                                    info!(
+                                        "Error sending host info request: {:?}",
+                                        e
+                                    );
                                 }
-                                .boxed()
-                            },
-                        ),
+
+                                let _ = rx.await;
+
+                                Ok(vec![])
+                            }
+                            .boxed()
+                        }),
                         ..Default::default()
                     }),
-                  ..Default::default()    
+                    ..Default::default()
                 },
                 Characteristic {
                     uuid: PROV_CHAR_MOBILE_INFO_UUID,
@@ -70,41 +128,48 @@ pub async fn provisioner() -> bluer::Result<()> {
                         write_without_response: false,
                         method: CharacteristicWriteMethod::Fun(Box::new(
                             move |new_value, req| {
+                                info!(
+                                    "Write request {:?} from {}",
+                                    &new_value, req.device_address
+                                );
 
-                                let counter_int = { 
-                                    let mut counter = counter.lock().unwrap();
-                                    *counter = *counter + 1;
-                                    *counter
-                                };
+                                //prepare the cmd to send to the server
+                                let (tx, rx) = oneshot::channel();
 
+                                let cmd = BleApi::RegisterMobile(
+                                    ble_cmd_api::BleCmd {
+                                        addr: req.device_address.to_string(),
+                                        payload: ble_cmd_api::BleBuffer {
+                                            remain_len: new_value.len(),
+                                            payload: new_value,
+                                        },
+                                        resp: tx,
+                                    },
+                                );
+
+                                let writer_server_conn =
+                                    writer_server_conn.clone();
                                 async move {
+                                    if let Err(e) = writer_server_conn.send(cmd).await {
+                                        info!("Error sending mobile registration request: {:?}", e);
+                                    }
 
-                                info!("Write request {:?} with value {:x?} size {} from {} {counter_int}", &req, &new_value, new_value.len(), req.device_address);
-                                
-                                Ok(())
-                            }
-                            .boxed()
+                                    let _ = rx.await;
+
+                                    Ok(())
+                                }.boxed()
                             },
                         )),
                         ..Default::default()
                     }),
                     ..Default::default()
-            }],
+                },
+            ],
             ..Default::default()
         }],
         ..Default::default()
     };
     let app_handle = adapter.serve_gatt_application(app).await?;
 
-    info!("Service ready. Press enter to quit.");
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-    let _ = lines.next_line().await;
-
-    info!("Removing service and advertisement");
-    drop(app_handle);
-    drop(adv_handle);
-    sleep(Duration::from_secs(1)).await;
-
-    Ok(())
+    Ok((adv_handle, app_handle))
 }

@@ -81,24 +81,6 @@ where
         Err(anyhow!("Host info not found"))
     }
 
-    fn get_host_name(&self) -> Result<String> {
-        if let Some(host) = self.data_db.read::<HostSchema>("host_info")? {
-            info!("Host name retrieved successfully.");
-            return Ok(host.name);
-        }
-        error!("Failed to retrieve host name: Host info not found.");
-        Err(anyhow!("Host info not found"))
-    }
-
-    fn get_host_id(&self) -> Result<String> {
-        if let Some(host) = self.data_db.read::<HostSchema>("host_info")? {
-            info!("Host ID retrieved successfully.");
-            return Ok(host.id);
-        }
-        error!("Failed to retrieve host ID: Host info not found.");
-        Err(anyhow!("Host info not found"))
-    }
-
     fn add_mobile(&mut self, mobile: &MobileSchema) -> Result<()> {
         if let Some(mut host) = self.data_db.read::<HostSchema>("host_info")? {
             // Update the host info with the new mobile id
@@ -148,48 +130,6 @@ mod tests {
 
         let app_data = AppData::new(mock_db, host_info);
         assert!(app_data.is_ok());
-    }
-
-    #[test]
-    fn test_get_host_name() {
-        init_logger();
-        let mut mock_db = MockKvDbOps::new();
-        let host_schema = HostSchema {
-            id: "123".to_string(),
-            name: "TestHost".to_string(),
-            connection_type: ConnectionType::WLAN,
-            registered_mobiles: Vec::new(),
-        };
-
-        mock_db
-            .expect_read::<HostSchema>()
-            .with(eq("host_info"))
-            .returning(move |_| Ok(Some(host_schema.clone())));
-
-        let app_data = AppData { data_db: mock_db };
-        let host_name = app_data.get_host_name();
-        assert_eq!(host_name.unwrap(), "TestHost");
-    }
-
-    #[test]
-    fn test_get_host_id() {
-        init_logger();
-        let mut mock_db = MockKvDbOps::new();
-        let host_schema = HostSchema {
-            id: "123".to_string(),
-            name: "TestHost".to_string(),
-            connection_type: ConnectionType::WLAN,
-            registered_mobiles: Vec::new(),
-        };
-
-        mock_db
-            .expect_read::<HostSchema>()
-            .with(eq("host_info"))
-            .returning(move |_| Ok(Some(host_schema.clone())));
-
-        let app_data = AppData { data_db: mock_db };
-        let host_id = app_data.get_host_id();
-        assert_eq!(host_id.unwrap(), "123");
     }
 
     #[test]

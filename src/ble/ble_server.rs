@@ -1,8 +1,6 @@
 use log::{error, info};
-use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::app_data::{HostSchema, MobileSchema};
 use crate::error::Result;
 
 #[cfg(test)]
@@ -16,19 +14,22 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
     fn set_register_mobile(
         &mut self, addr: String, data: BleBuffer,
     ) -> Result<()>;
-    fn get_host_info(&mut self, addr: String, max_size: usize)
-        -> Result<BleBuffer>;
+    fn read_host_info(
+        &mut self, addr: String, max_size: usize,
+    ) -> Result<BleBuffer>;
     fn device_disconnected(&mut self, addr: String) -> Result<()>;
 }
 
+pub type ServerConn = mpsc::Sender<BleApi>;
+
 pub struct BleServer {
-    ble_tx: Sender<BleApi>,
+    ble_tx: ServerConn,
     _drop_tx: oneshot::Sender<()>,
 }
 
 impl BleServer {
     pub fn new(
-        mut comm_hanlder: impl MultiMobileCommService, req_buffer_size: usize,
+        mut comm_handler: impl MultiMobileCommService, req_buffer_size: usize,
     ) -> Self {
         let (ble_tx, mut ble_rx) = mpsc::channel(req_buffer_size);
 
@@ -38,7 +39,7 @@ impl BleServer {
             loop {
                 tokio::select! {
                     Some(req) = ble_rx.recv() => {
-                       Self::handle_request(&mut comm_hanlder, req);
+                       Self::handle_request(&mut comm_handler, req);
                     }
                     _ = &mut drop_rx => {
                         info!("MobileManager task is stopping");
@@ -79,7 +80,7 @@ impl BleServer {
                 info!("Host info requested by: {:?}", query.addr);
                 if let Err(e) = query.resp.send(
                     comm_handler
-                        .get_host_info(query.addr, query.max_buffer_len),
+                        .read_host_info(query.addr, query.max_buffer_len),
                 ) {
                     error!("Error sending host info: {:?}", e);
                 }
@@ -91,7 +92,7 @@ impl BleServer {
         };
     }
 
-    pub fn get_tx(&self) -> Sender<BleApi> {
+    pub fn connection(&self) -> ServerConn {
         self.ble_tx.clone()
     }
 }

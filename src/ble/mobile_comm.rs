@@ -39,20 +39,6 @@ pub trait AppDataStore: Send + Sync + 'static {
     /// Returns an error if the host information is not found in the data store.
     fn get_host_prov_info(&self) -> Result<HostProvInfo>;
 
-    /// Retrieves the host name from the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn get_host_name(&self) -> Result<String>;
-
-    /// Retrieves the host ID from the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn get_host_id(&self) -> Result<String>;
-
     /// Adds a mobile device to the data store.
     ///
     /// # Errors
@@ -61,9 +47,20 @@ pub trait AppDataStore: Send + Sync + 'static {
     fn add_mobile(&mut self, mobile: &MobileSchema) -> Result<()>;
 }
 
+//This is a enum bc we only do a single operation at a time,
+//if a new operation is requested, it will overwrite the previous one
+//turn into a hash map to keep track of parallel operations, not currently used
+#[derive(Default, PartialEq, Debug)]
 enum MobileDataState {
-    Provisioning { remain_len: usize },
-    Streaming,
+    ReadingHostInfo {
+        remain_len: usize,
+    },
+    WritingMobileInfo {
+        current_buffer: Vec<u8>,
+    },
+
+    #[default]
+    Idle,
 }
 
 type MobileMap = HashMap<Address, MobileDataState>;
@@ -90,35 +87,66 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     }
 
     fn set_register_mobile(
-        &mut self, addr: Address, payload: BleBuffer,
+        &mut self, addr: Address, data: BleBuffer,
     ) -> Result<()> {
-        info!("Mobile registered: {:?}", addr);
+        info!("Registering mobile: {:?}", addr);
+
+        //check if the mobile is connected or ready for the next op
+        match self.connected.get(&addr) {
+            Some(MobileDataState::WritingMobileInfo { .. }) => {}
+            _ => {
+                self.connected.insert(
+                    addr.clone(),
+                    MobileDataState::WritingMobileInfo {
+                        current_buffer: vec![],
+                    },
+                );
+            }
+        }
+
+        if let MobileDataState::WritingMobileInfo { current_buffer } = self
+            .connected
+            .get_mut(&addr)
+            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+        {
+            current_buffer.extend_from_slice(&data.payload);
+
+            if data.remain_len == 0 {
+                let mobile =
+                    serde_json::from_slice::<MobileSchema>(&current_buffer)?;
+                self.db.add_mobile(&mobile)?;
+                info!("Mobile registered: {:?}", mobile);
+                return Ok(());
+            }
+        }
+
         Ok(())
     }
 
-    fn get_host_info(
+    fn read_host_info(
         &mut self, addr: Address, max_buffer_len: usize,
     ) -> Result<BleBuffer> {
         info!("Host info requested by: {:?}", addr);
 
         let total_len = self.host_info.len();
 
-        //check if the mobile is connected if not add it to the connected devices
-        if !self.connected.contains_key(&addr) {
-            self.connected.insert(
-                addr.clone(),
-                MobileDataState::Provisioning { remain_len: total_len },
-            );
+        //check if the mobile is connected or ready for the next op
+        match self.connected.get(&addr) {
+            Some(MobileDataState::ReadingHostInfo { .. }) => {}
+            _ => {
+                self.connected.insert(
+                    addr.clone(),
+                    MobileDataState::ReadingHostInfo { remain_len: total_len },
+                );
+            }
         }
 
-        if let MobileDataState::Provisioning { remain_len } = self
+        if let MobileDataState::ReadingHostInfo { remain_len } = self
             .connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
             if *remain_len <= max_buffer_len {
-                self.connected.insert(addr, MobileDataState::Streaming);
-
                 return Ok(BleBuffer {
                     remain_len: 0,
                     payload: self.host_info.clone(),
@@ -135,6 +163,6 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
             return Ok(BleBuffer { remain_len: *remain_len, payload });
         }
 
-        Err(anyhow!("Mobile not ready for provisioning"))
+        Err(anyhow!("Mobile is not reading host info"))
     }
 }

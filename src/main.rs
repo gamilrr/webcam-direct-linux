@@ -92,7 +92,6 @@ async fn main() -> Result<()> {
 
 //    device_props(adapter.clone()).await?;
 //
-    provisioner().await?;
 
     info!("Service ready. Press enter to quit.");
     let stdin = tokio::io::BufReader::new(tokio::io::stdin());
