@@ -79,7 +79,8 @@ pub struct MobileComm<Db> {
 
 impl<Db: AppDataStore> MobileComm<Db> {
     pub fn new(db: Db) -> Result<Self> {
-        let host_info = serde_json::to_vec(&db.get_host_prov_info()?)?;
+        let host = db.get_host_prov_info()?;
+        let host_info = serde_json::to_vec(&host)?;
 
         Ok(Self { db, connected: HashMap::new(), host_info })
     }
@@ -163,7 +164,9 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 initial_len + max_buffer_len
             };
 
-            let payload = self.host_info.clone()[initial_len..end_len].to_vec();
+            let payload = self.host_info[initial_len..end_len].to_vec();
+
+            info!("Sending host info: {:?}", payload);
 
             let ble_buffer = BufferComm { remain_len: *remain_len, payload };
 

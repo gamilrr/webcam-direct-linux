@@ -6,10 +6,11 @@ mod kv_db;
 mod schemas;
 
 use anyhow::anyhow;
-use kv_db::KvDbOps;
+pub use kv_db::DiskBasedDb;
+pub use kv_db::KvDbOps;
 use log::error;
 use log::info;
-use schemas::ConnectionType;
+pub use schemas::ConnectionType;
 pub use schemas::HostSchema;
 pub use schemas::MobileSchema;
 use uuid::Uuid;
@@ -24,6 +25,7 @@ pub struct AppData<Db> {
 }
 
 /// A struct that holds information about the host.
+#[derive(Debug, Clone)]
 pub struct HostInfo {
     pub name: String,
     pub connection_type: ConnectionType,

@@ -1,34 +1,29 @@
 mod access_point_ctl;
 mod app_data;
 mod app_data_store;
+mod ble;
 mod error;
 mod gatt_const;
-mod ble;
 mod provisioner;
 mod sdp_exchanger;
 
-use std::io::{self, Read};
 
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},
-    iw_link::{wdev_drv, IwLink, IwLinkHandler},
+    iw_link::{wdev_drv, IwLink},
     process_hdl::ProcessHdl,
     wifi_manager::{
         FileHdl, HostapdProc, WifiCredentials, WifiManager, WpaCtl,
     },
     AccessPointCtl, ApController,
 };
-use app_data::HostInfo;
-use app_data_store::host_entity::ConnectionType;
+use app_data::{AppData, ConnectionType, DiskBasedDb, HostInfo};
 use error::Result;
 
-use ble::ble_clients::provisioner::provisioner;
+use ble::{ble_clients::provisioner::ProvisionerClient, ble_server::BleServer, AppDataStore, MobileComm};
 use tokio::io::AsyncBufReadExt;
-use webrtc::util::vnet::router;
 
-use crate::app_data_store::AppStore;
 use log::info;
-use provisioner::Provisioner;
 use sdp_exchanger::SdpExchanger;
 
 fn setup_access_point() -> Result<impl AccessPointCtl> {
@@ -55,8 +50,14 @@ fn setup_access_point() -> Result<impl AccessPointCtl> {
 
     let wifi_manager = WifiManager::new(&creds, hostapd_proc, wpactrl)?;
 
+    let mut ap = ApController::new(link, dhcp_server_proc, wifi_manager);
+
+    ap.start_dhcp_server(DhcpIpRange::new("193.168.3.5", "193.168.3.150")?)?;
+
+    ap.start_wifi()?;
+
     //init Access Point manager------
-    Ok(ApController::new(link, dhcp_server_proc, wifi_manager))
+    Ok(ap)
 }
 
 #[tokio::main]
@@ -65,33 +66,55 @@ async fn main() -> Result<()> {
 
     info!("Starting webcam direct");
 
-    // let mut ap_controller = setup_access_point()?;
+    //get host name
+    let mut host_info = HostInfo {
+        name: "MyPC".to_string(),
+        connection_type: ConnectionType::WLAN,
+    };
 
-    //ap_controller
-    //    .start_dhcp_server(DhcpIpRange::new("193.168.3.5", "193.168.3.150")?)?;
+    if let Ok(host_name) = hostname::get()?.into_string() {
+        host_info.name = host_name;
+    }
 
-    //ap_controller.start_wifi()?;
+    let ap_controller_rc = setup_access_point();
+    if ap_controller_rc.is_ok() {
+        host_info.connection_type = ConnectionType::AP;
+    }
 
-//    let session = bluer::Session::new().await?;
+    let session = bluer::Session::new().await?;
 
- //   let adapter = session.default_adapter().await?;
+    let adapter = session.default_adapter().await?;
 
-  //  adapter.set_powered(true).await?;
+    adapter.set_powered(true).await?;
 
-//    let app_store = AppStore::new("webcam-direct-config.json").await;
+    //init the in disk database
+    let config_path = "/tmp";
 
-//    info!("Webcam direct started");
+    let disk_db = DiskBasedDb::open_from(config_path)?;
+
+    let app_data = AppData::new(disk_db, host_info.clone())?;
+
+    let mobile_comm = MobileComm::new(app_data)?;
+
+    let ble_server = BleServer::new(mobile_comm, 512);
+
+    let conn = ble_server.connection();
+    let _provisioner = ProvisionerClient::new(adapter.clone(), conn, host_info.name); 
+
+    //    let app_store = AppStore::new("webcam-direct-config.json").await;
+
+    //    info!("Webcam direct started");
     // let mut sdp_exchanger =
     //     SdpExchanger::new(adapter.clone(), app_store.clone());
 
-//    let mut provisioner = Provisioner::new(adapter.clone(), app_store.clone());
+    //    let mut provisioner = Provisioner::new(adapter.clone(), app_store.clone());
 
-//    provisioner.start_provisioning().await?;
+    //    provisioner.start_provisioning().await?;
 
     //sdp_exchanger.start().await?;
 
-//    device_props(adapter.clone()).await?;
-//
+    //    device_props(adapter.clone()).await?;
+    //
 
     info!("Service ready. Press enter to quit.");
     let stdin = tokio::io::BufReader::new(tokio::io::stdin());
