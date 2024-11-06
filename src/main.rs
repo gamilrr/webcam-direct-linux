@@ -7,7 +7,6 @@ mod gatt_const;
 mod provisioner;
 mod sdp_exchanger;
 
-
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},
     iw_link::{wdev_drv, IwLink},
@@ -20,7 +19,10 @@ use access_point_ctl::{
 use app_data::{AppData, ConnectionType, DiskBasedDb, HostInfo};
 use error::Result;
 
-use ble::{ble_clients::provisioner::ProvisionerClient, ble_server::BleServer, AppDataStore, MobileComm};
+use ble::{
+    ble_clients::provisioner::ProvisionerClient, ble_server::BleServer,
+    AppDataStore, MobileComm,
+};
 use tokio::io::AsyncBufReadExt;
 
 use log::info;
@@ -98,8 +100,11 @@ async fn main() -> Result<()> {
 
     let ble_server = BleServer::new(mobile_comm, 512);
 
-    let conn = ble_server.connection();
-    let _provisioner = ProvisionerClient::new(adapter.clone(), conn, host_info.name); 
+    let _provisioner = ProvisionerClient::new(
+        adapter.clone(),
+        ble_server.connection(),
+        host_info.name,
+    );
 
     //    let app_store = AppStore::new("webcam-direct-config.json").await;
 

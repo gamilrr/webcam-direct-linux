@@ -17,7 +17,7 @@ use mockall::automock;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BufferComm {
     pub remain_len: usize,
-    pub payload: Vec<u8>,
+    pub payload: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,7 +62,7 @@ enum MobileDataState {
         remain_len: usize,
     },
     WritingMobileInfo {
-        current_buffer: BleBuffer,
+        current_buffer: String,
     },
 
     #[default]
@@ -74,13 +74,13 @@ type MobileMap = HashMap<Address, MobileDataState>;
 pub struct MobileComm<Db> {
     db: Db,
     connected: MobileMap,
-    host_info: Vec<u8>,
+    host_info: String,
 }
 
 impl<Db: AppDataStore> MobileComm<Db> {
     pub fn new(db: Db) -> Result<Self> {
         let host = db.get_host_prov_info()?;
-        let host_info = serde_json::to_vec(&host)?;
+        let host_info = serde_json::to_string(&host)?;
 
         Ok(Self { db, connected: HashMap::new(), host_info })
     }
@@ -105,7 +105,7 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 self.connected.insert(
                     addr.clone(),
                     MobileDataState::WritingMobileInfo {
-                        current_buffer: vec![],
+                        current_buffer: String::new(),
                     },
                 );
             }
@@ -118,11 +118,13 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         {
             let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
 
-            current_buffer.extend_from_slice(&buff_comm.payload);
+            current_buffer.push_str(&buff_comm.payload);
+
+            //current_buffer.extend_from_slice(&buff_comm.payload);
 
             if buff_comm.remain_len == 0 {
                 let mobile =
-                    serde_json::from_slice::<MobileSchema>(&current_buffer)?;
+                    serde_json::from_str(&current_buffer)?;
                 self.db.add_mobile(&mobile)?;
                 info!("Mobile registered: {:?}", mobile);
             }
@@ -164,7 +166,7 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 initial_len + max_buffer_len
             };
 
-            let payload = self.host_info[initial_len..end_len].to_vec();
+            let payload = self.host_info[initial_len..end_len].to_string();
 
             info!("Sending host info: {:?}", payload);
 
