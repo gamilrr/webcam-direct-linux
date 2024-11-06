@@ -28,6 +28,8 @@ use tokio::io::AsyncBufReadExt;
 use log::info;
 use sdp_exchanger::SdpExchanger;
 
+use crate::ble::ble_clients::device_props::MobileBlePropClient;
+
 fn setup_access_point() -> Result<impl AccessPointCtl> {
     let if_name = "wcdirect0";
 
@@ -105,6 +107,9 @@ async fn main() -> Result<()> {
         ble_server.connection(),
         host_info.name,
     );
+
+    let _mobile_prop_client =
+        MobileBlePropClient::new(adapter.clone(), ble_server.connection());
 
     //    let app_store = AppStore::new("webcam-direct-config.json").await;
 

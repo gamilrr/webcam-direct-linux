@@ -39,6 +39,8 @@ impl ProvisionerClient {
                 info!("Provisioner started");
 
                 let _ = rx.await;
+
+                info!("Provisioner stopped");
             } else {
                 info!("Provisioner failed to start");
             }

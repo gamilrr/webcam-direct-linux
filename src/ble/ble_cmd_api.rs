@@ -34,4 +34,7 @@ pub enum BleApi {
 
     //Mobile Identification
     MobileIdentification(BleCmd),
+
+    //Connection Status
+    ConnectionStatus(BleCmd),
 }

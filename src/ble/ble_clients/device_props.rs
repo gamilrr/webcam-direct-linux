@@ -1,5 +1,5 @@
 //! Discover Bluetooth devices and list them.
-use crate::error::Result;
+use crate::{ble::ble_server::ServerConn, error::Result};
 use bluer::{
     Adapter, AdapterEvent, Address, DeviceEvent, DiscoveryFilter,
     DiscoveryTransport,
@@ -7,6 +7,7 @@ use bluer::{
 use futures::{pin_mut, stream::SelectAll, StreamExt};
 use log::info;
 use std::{collections::HashSet, env};
+use tokio::sync::oneshot;
 
 async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
     let device = adapter.device(addr)?;
@@ -40,13 +41,34 @@ async fn query_all_device_properties(
     Ok(())
 }
 
-pub async fn device_props(adapter: Adapter) -> Result<()> {
-    //let filter_addr: HashSet<_> = env::args().filter_map(|arg| arg.parse::<Address>().ok()).collect();
+pub struct MobileBlePropClient {
+    _tx_drop: oneshot::Sender<()>,
+}
 
-    info!(
-        "Using discovery filter:\n{:#?}\n\n",
-        adapter.discovery_filter().await
-    );
+impl MobileBlePropClient {
+    pub fn new(ble_adapter: Adapter, server_conn: ServerConn) -> Self {
+        let (tx, rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            if let Ok(()) = device_props(ble_adapter, server_conn).await {
+                info!("MobileBlePropClient started");
+
+                let _ = rx.await;
+
+                info!("MobileBlePropClient stopped");
+            } else {
+                info!("MobileBlePropClient failed to start");
+            }
+        });
+
+        Self { _tx_drop: tx }
+    }
+}
+
+pub async fn device_props(
+    adapter: Adapter, server_conn: ServerConn,
+) -> Result<()> {
+    //let filter_addr: HashSet<_> = env::args().filter_map(|arg| arg.parse::<Address>().ok()).collect();
 
     let device_events = adapter.events().await?;
     pin_mut!(device_events);
@@ -58,12 +80,6 @@ pub async fn device_props(adapter: Adapter) -> Result<()> {
             Some(device_event) = device_events.next() => {
                 match device_event {
                     AdapterEvent::DeviceAdded(addr) => {
-                       // if !addr.to_string().contains("40:CA:63:45:B9:4A") {
-                       //     continue;
-                       // } else {
-                       //     info!("Device added: {addr}");
-                       // }
-
                         info!("Device added from query_device: {addr}");
                         let res = query_device(&adapter, addr).await;
                         if let Err(err) = res {
@@ -83,10 +99,11 @@ pub async fn device_props(adapter: Adapter) -> Result<()> {
 
                     AdapterEvent::DeviceRemoved(addr) => {
                         info!("Device removed: {addr}");
+
+
                     }
                     _ => (),
                 }
-                info!("this");
             }
 
             Some((addr, DeviceEvent::PropertyChanged(property))) = all_change_events.next() => {

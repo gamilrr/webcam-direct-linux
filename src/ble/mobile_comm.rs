@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use log::info;
 
 use anyhow::anyhow;
+use neli::ToBytes;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -26,6 +27,7 @@ pub struct HostProvInfo {
     pub name: String,
     pub connection_type: String,
 }
+
 /*
  * This represent the json
  * {
@@ -120,11 +122,8 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
 
             current_buffer.push_str(&buff_comm.payload);
 
-            //current_buffer.extend_from_slice(&buff_comm.payload);
-
             if buff_comm.remain_len == 0 {
-                let mobile =
-                    serde_json::from_str(&current_buffer)?;
+                let mobile = serde_json::from_str(&current_buffer)?;
                 self.db.add_mobile(&mobile)?;
                 info!("Mobile registered: {:?}", mobile);
             }
@@ -158,21 +157,25 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         {
             let initial_len = total_len - *remain_len;
 
-            let end_len = if max_buffer_len >= *remain_len {
-                *remain_len = 0;
-                total_len
+            let ble_comm = if max_buffer_len >= *remain_len {
+                *remain_len = total_len;
+                BufferComm {
+                    remain_len: 0,
+                    payload: self.host_info[initial_len..total_len].to_owned(),
+                }
             } else {
                 *remain_len -= max_buffer_len;
-                initial_len + max_buffer_len
+                BufferComm {
+                    remain_len: *remain_len,
+                    payload: self.host_info
+                        [initial_len..initial_len + max_buffer_len]
+                        .to_owned(),
+                }
             };
 
-            let payload = self.host_info[initial_len..end_len].to_string();
+            info!("Sending host info: {:?}", ble_comm);
 
-            info!("Sending host info: {:?}", payload);
-
-            let ble_buffer = BufferComm { remain_len: *remain_len, payload };
-
-            return Ok(serde_json::to_vec(&ble_buffer)?);
+            return Ok(serde_json::to_vec(&ble_comm)?);
         }
 
         Err(anyhow!("Mobile is not reading host info"))
