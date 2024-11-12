@@ -39,7 +39,7 @@ impl BleServer {
             loop {
                 tokio::select! {
                     Some(req) = ble_rx.recv() => {
-                       Self::handle_request(&mut comm_handler, req);
+                       handle_request(&mut comm_handler, req);
                     }
                     _ = &mut drop_rx => {
                         info!("MobileManager task is stopping");
@@ -52,49 +52,47 @@ impl BleServer {
         Self { ble_tx, _drop_tx: drop_tx }
     }
 
-    //This function does not return a Result since every request is successful
-    //if internally any operation fails, it should handle it accordingly
-    fn handle_request(
-        comm_handler: &mut impl MultiMobileCommService, req: BleApi,
-    ) {
-        match req {
-            BleApi::MobileDisconnected(cmd) => {
-                info!("Mobile disconnected: {:?}", cmd.addr);
-                if let Err(e) =
-                    cmd.resp.send(comm_handler.device_disconnected(cmd.addr))
-                {
-                    error!("Error disconnecting mobile: {:?}", e);
-                }
-            }
-
-            BleApi::RegisterMobile(cmd) => {
-                info!("Mobile registered: {:?}", cmd.addr);
-                if let Err(_) = cmd.resp.send(
-                    comm_handler.set_register_mobile(cmd.addr, cmd.payload),
-                ) {
-                    error!("Error sending mobile registration response");
-                }
-            }
-
-            BleApi::HostInfo(query) => {
-                info!("Host info requested by: {:?}", query.addr);
-                if let Err(e) = query.resp.send(
-                    comm_handler
-                        .read_host_info(query.addr, query.max_buffer_len),
-                ) {
-                    error!("Error sending host info: {:?}", e);
-                }
-            }
-
-            _ => {
-                info!("Unhandled event: {:?}", req);
-            }
-        };
-    }
-
     pub fn connection(&self) -> ServerConn {
         self.ble_tx.clone()
     }
+}
+
+//This function does not return a Result since every request is successful
+//if internally any operation fails, it should handle it accordingly
+fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
+    match req {
+        BleApi::MobileDisconnected(cmd) => {
+            info!("Mobile disconnected: {:?}", cmd.addr);
+            if let Err(e) =
+                cmd.resp.send(comm_handler.device_disconnected(cmd.addr))
+            {
+                error!("Error disconnecting mobile: {:?}", e);
+            }
+        }
+
+        BleApi::RegisterMobile(cmd) => {
+            info!("Mobile registered: {:?}", cmd.addr);
+            if let Err(_) = cmd
+                .resp
+                .send(comm_handler.set_register_mobile(cmd.addr, cmd.payload))
+            {
+                error!("Error sending mobile registration response");
+            }
+        }
+
+        BleApi::HostInfo(query) => {
+            info!("Host info requested by: {:?}", query.addr);
+            if let Err(e) = query.resp.send(
+                comm_handler.read_host_info(query.addr, query.max_buffer_len),
+            ) {
+                error!("Error sending host info: {:?}", e);
+            }
+        }
+
+        _ => {
+            info!("Unhandled event: {:?}", req);
+        }
+    };
 }
 
 #[cfg(test)]

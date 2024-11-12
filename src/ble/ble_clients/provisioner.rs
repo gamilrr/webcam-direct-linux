@@ -10,10 +10,10 @@ use bluer::{
 use futures::FutureExt;
 use log::{error, info};
 use tokio::sync::oneshot;
-
+use crate::error::Result;
 use crate::{
     ble::{
-        ble_cmd_api::{self, BleApi, BleBuffer, BleCmd, BleQuery},
+        ble_cmd_api::{ BleApi, BleCmd, BleQuery},
         ble_server::ServerConn,
     },
     gatt_const::{
@@ -42,7 +42,7 @@ impl ProvisionerClient {
 
                 info!("Provisioner stopped");
             } else {
-                info!("Provisioner failed to start");
+                error!("Provisioner failed to start");
             }
         });
 
@@ -52,12 +52,12 @@ impl ProvisionerClient {
 
 pub async fn provisioner(
     adapter: Adapter, server_conn: ServerConn, host_name: String,
-) -> bluer::Result<(AdvertisementHandle, ApplicationHandle)> {
+) -> Result<(AdvertisementHandle, ApplicationHandle)> {
     info!(
-        "Advertising on Bluetooth adapter {} with address {}",
+        "Advertising Provisioner on Bluetooth adapter {} with address {}",
         adapter.name(),
         adapter.address().await?
-    );
+        );
     let le_advertisement = Advertisement {
         service_uuids: vec![PROV_SERV_HOST_UUID].into_iter().collect(),
         discoverable: Some(true),
@@ -83,7 +83,7 @@ pub async fn provisioner(
                             info!(
                                 "Read request {:?} from {}",
                                 &req, req.device_address
-                            );
+                                );
 
                             //prepare the cmd to send to the server
                             let (tx, rx) = oneshot::channel();
@@ -99,16 +99,16 @@ pub async fn provisioner(
                             async move {
                                 if let Ok(_) =
                                     reader_server_conn.send(req).await
-                                {
-                                    if let Ok(resp) = rx.await {
-                                        if let Ok(resp) = resp {
-                                            return Ok(resp);
-                                        } else {
-                                            error!("Error reading host info");
+                                    {
+                                        if let Ok(resp) = rx.await {
+                                            if let Ok(resp) = resp {
+                                                return Ok(resp);
+                                            } else {
+                                                error!("Error reading host info");
+                                            }
+                                            error!( "Error receiving host info response");
                                         }
-                                        error!( "Error receiving host info response");
-                                    }
-                                }                                     
+                                    }                                     
 
                                 error!("Error sending host info request");
 
@@ -126,49 +126,49 @@ pub async fn provisioner(
                         write: true,
                         write_without_response: false,
                         method: CharacteristicWriteMethod::Fun(Box::new(
-                            move |new_value, req| {
-                                info!(
-                                    "Write request {:?} from {}",
-                                    &new_value, req.device_address
-                                );
+                                move |new_value, req| {
+                                    info!(
+                                        "Write request {:?} from {}",
+                                        &new_value, req.device_address
+                                        );
 
-                                //prepare the request to send to the server
-                                let (tx, rx) = oneshot::channel();
-                                let req = BleApi::RegisterMobile(BleCmd {
+                                    //prepare the request to send to the server
+                                    let (tx, rx) = oneshot::channel();
+                                    let req = BleApi::RegisterMobile(BleCmd {
                                         addr: req.device_address.to_string(),
                                         payload: new_value,
                                         resp: tx,
                                     },
-                                );
+                                    );
 
-                                let writer_server_conn =
-                                    writer_server_conn.clone();
+                                    let writer_server_conn =
+                                        writer_server_conn.clone();
 
-                                async move {
-                                    if let Ok(_) = writer_server_conn.send(req).await {
+                                    async move {
+                                        if let Ok(_) = writer_server_conn.send(req).await {
 
-                                        if let Ok(resp) = rx.await {
-                                            if let Ok(_) = resp {
-                                                return Ok(());
-                                            } else {
-                                                error!("Error writing mobile info");
+                                            if let Ok(resp) = rx.await {
+                                                if let Ok(_) = resp {
+                                                    return Ok(());
+                                                } else {
+                                                    error!("Error writing mobile info");
+                                                }
+                                                error!("Error sending mobile info");
                                             }
-                                            error!("Error sending mobile info");
-                                        }
-                                    } 
+                                        } 
 
-                                    error!("Error sending mobile registration request");
+                                        error!("Error sending mobile registration request");
 
-                                    Err(ReqError::Failed)
-                                }.boxed()
-                            },
-                        )),
-                        ..Default::default()
+                                        Err(ReqError::Failed)
+                                    }.boxed()
+                                },
+                                )),
+                                ..Default::default()
                     }),
                     ..Default::default()
                 },
-            ],
-            ..Default::default()
+                ],
+                ..Default::default()
         }],
         ..Default::default()
     };

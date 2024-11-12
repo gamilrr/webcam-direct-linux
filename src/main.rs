@@ -20,15 +20,16 @@ use app_data::{AppData, ConnectionType, DiskBasedDb, HostInfo};
 use error::Result;
 
 use ble::{
-    ble_clients::provisioner::ProvisionerClient, ble_server::BleServer,
+    ble_clients::{
+        mobile_prop::MobilePropClient, provisioner::ProvisionerClient,
+        sdp_exchanger::SdpExchangerClient,
+    },
+    ble_server::BleServer,
     AppDataStore, MobileComm,
 };
 use tokio::io::AsyncBufReadExt;
 
 use log::info;
-use sdp_exchanger::SdpExchanger;
-
-use crate::ble::ble_clients::device_props::MobileBlePropClient;
 
 fn setup_access_point() -> Result<impl AccessPointCtl> {
     let if_name = "wcdirect0";
@@ -98,6 +99,8 @@ async fn main() -> Result<()> {
 
     let app_data = AppData::new(disk_db, host_info.clone())?;
 
+    let host_prov_info = app_data.get_host_prov_info()?;
+
     let mobile_comm = MobileComm::new(app_data)?;
 
     let ble_server = BleServer::new(mobile_comm, 512);
@@ -105,34 +108,23 @@ async fn main() -> Result<()> {
     let _provisioner = ProvisionerClient::new(
         adapter.clone(),
         ble_server.connection(),
-        host_info.name,
+        host_prov_info.name.clone(),
     );
 
     let _mobile_prop_client =
-        MobileBlePropClient::new(adapter.clone(), ble_server.connection());
+        MobilePropClient::new(adapter.clone(), ble_server.connection());
 
-    //    let app_store = AppStore::new("webcam-direct-config.json").await;
-
-    //    info!("Webcam direct started");
-    // let mut sdp_exchanger =
-    //     SdpExchanger::new(adapter.clone(), app_store.clone());
-
-    //    let mut provisioner = Provisioner::new(adapter.clone(), app_store.clone());
-
-    //    provisioner.start_provisioning().await?;
-
-    //sdp_exchanger.start().await?;
-
-    //    device_props(adapter.clone()).await?;
-    //
+    let _sdp_exchanger = SdpExchangerClient::new(
+        adapter.clone(),
+        ble_server.connection(),
+        host_prov_info.name.clone(),
+        host_prov_info.id,
+    );
 
     info!("Service ready. Press enter to quit.");
     let stdin = tokio::io::BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
     let _ = lines.next_line().await;
-
-    //provisioner.stop_provisioning();
-    //sdp_exchanger.stop().await?;
 
     info!("webcam direct stopped stopped");
 

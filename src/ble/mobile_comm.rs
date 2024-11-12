@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use log::info;
 
 use anyhow::anyhow;
-use neli::ToBytes;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -60,10 +59,11 @@ pub trait AppDataStore: Send + Sync + 'static {
 //turn into a hash map to keep track of parallel operations, not currently used
 #[derive(Default, PartialEq, Debug)]
 enum MobileDataState {
-    ReadingHostInfo {
+    ReadHostInfo {
         remain_len: usize,
     },
-    WritingMobileInfo {
+
+    WriteMobileInfo {
         current_buffer: String,
     },
 
@@ -102,25 +102,29 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
 
         //check if the mobile is connected or ready for the next op
         match self.connected.get(&addr) {
-            Some(MobileDataState::WritingMobileInfo { .. }) => {}
+            Some(MobileDataState::WriteMobileInfo { .. }) => {}
             _ => {
                 self.connected.insert(
                     addr.clone(),
-                    MobileDataState::WritingMobileInfo {
+                    MobileDataState::WriteMobileInfo {
                         current_buffer: String::new(),
                     },
                 );
             }
         }
 
-        if let MobileDataState::WritingMobileInfo { current_buffer } = self
+        if let MobileDataState::WriteMobileInfo { current_buffer } = self
             .connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
             let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
 
+            info!("buff_comm {:?}", buff_comm);
+
             current_buffer.push_str(&buff_comm.payload);
+
+            info!("current_buffer {:?}", buff_comm);
 
             if buff_comm.remain_len == 0 {
                 let mobile = serde_json::from_str(&current_buffer)?;
@@ -141,16 +145,16 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
 
         //check if the mobile is connected or ready for the next op
         match self.connected.get(&addr) {
-            Some(MobileDataState::ReadingHostInfo { .. }) => {}
+            Some(MobileDataState::ReadHostInfo { .. }) => {}
             _ => {
                 self.connected.insert(
                     addr.clone(),
-                    MobileDataState::ReadingHostInfo { remain_len: total_len },
+                    MobileDataState::ReadHostInfo { remain_len: total_len },
                 );
             }
         }
 
-        if let MobileDataState::ReadingHostInfo { remain_len } = self
+        if let MobileDataState::ReadHostInfo { remain_len } = self
             .connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
