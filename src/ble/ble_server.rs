@@ -18,6 +18,10 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, max_size: usize,
     ) -> Result<BleBuffer>;
     fn device_disconnected(&mut self, addr: String) -> Result<()>;
+
+    fn set_mobile_pnp_id(
+        &mut self, addr: String, data: BleBuffer,
+    ) -> Result<()>;
 }
 
 pub type ServerConn = mpsc::Sender<BleApi>;
@@ -86,6 +90,16 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
                 comm_handler.read_host_info(query.addr, query.max_buffer_len),
             ) {
                 error!("Error sending host info: {:?}", e);
+            }
+        }
+
+        BleApi::MobilePnpId(cmd) => {
+            info!("Mobile PnP ID");
+            if let Err(_) = cmd
+                .resp
+                .send(comm_handler.set_mobile_pnp_id(cmd.addr, cmd.payload))
+            {
+                error!("Error setting mobile PnP ID");
             }
         }
 

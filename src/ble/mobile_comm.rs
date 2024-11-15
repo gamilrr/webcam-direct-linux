@@ -57,6 +57,11 @@ pub trait AppDataStore: Send + Sync + 'static {
 //This is a enum bc we only do a single operation at a time,
 //if a new operation is requested, it will overwrite the previous one
 //turn into a hash map to keep track of parallel operations, not currently used
+//
+//States:
+//Provisioning: ReadHostInfo->WriteMobileInfo->ReadyToStream
+//Identification: WriteMobileId->ReadyToStream
+//
 #[derive(Default, PartialEq, Debug)]
 enum MobileDataState {
     ReadHostInfo {
@@ -64,6 +69,10 @@ enum MobileDataState {
     },
 
     WriteMobileInfo {
+        current_buffer: String,
+    },
+
+    WriteMobileId {
         current_buffer: String,
     },
 
@@ -86,6 +95,49 @@ impl<Db: AppDataStore> MobileComm<Db> {
 
         Ok(Self { db, connected: HashMap::new(), host_info })
     }
+
+//    fn process_write<T>(
+//        &mut self, state: MobileDataState, addr: Address,
+//        callback: impl FnOnce(&str) -> Result<BleBuffer>,
+//        ) -> Result<()> {
+//
+//        //check if the mobile is connected or ready for the next op
+//        match self.connected.get(&addr) {
+//            Some(T{ .. }) => {}
+//            _ => {
+//                self.connected.insert(
+//                    addr.clone(),
+//                    MobileDataState::WriteMobileInfo {
+//                        current_buffer: String::new(),
+//                    },
+//                    );
+//            }
+//        }
+//
+//        if let MobileDataState::WriteMobileInfo { current_buffer } = self
+//            .connected
+//                .get_mut(&addr)
+//                .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+//                {
+//                    let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
+//
+//                    info!("buff_comm {:?}", buff_comm);
+//
+//                    current_buffer.push_str(&buff_comm.payload);
+//
+//                    info!("current_buffer {:?}", buff_comm);
+//
+//                    if buff_comm.remain_len == 0 {
+//                        let mobile = serde_json::from_str(&current_buffer)?;
+//                        self.db.add_mobile(&mobile)?;
+//                        info!("Mobile registered: {:?}", mobile);
+//                    }
+//                }
+//
+//        Ok(())
+// }
+
+
 }
 
 impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
@@ -183,5 +235,46 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         }
 
         Err(anyhow!("Mobile is not reading host info"))
+    }
+
+    fn set_mobile_pnp_id(
+        &mut self, addr: Address, data: BleBuffer,
+    ) -> Result<()> {
+        info!("Mobile PnP ID: {:?}", addr);
+
+        //check if the mobile is connected or ready for the next op
+        match self.connected.get(&addr) {
+            Some(MobileDataState::WriteMobileId { .. }) => {}
+            _ => {
+                self.connected.insert(
+                    addr.clone(),
+                    MobileDataState::WriteMobileId {
+                        current_buffer: String::new(),
+                    },
+                );
+            }
+        }
+
+        if let MobileDataState::WriteMobileId { current_buffer } = self
+            .connected
+            .get_mut(&addr)
+            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+        {
+            let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
+
+            info!("buff_comm {:?}", buff_comm);
+
+            current_buffer.push_str(&buff_comm.payload);
+
+            info!("current_buffer {:?}", buff_comm);
+
+            if buff_comm.remain_len == 0 {
+                let mobile_id = current_buffer;
+
+                info!("Mobile id: {mobile_id}");
+            }
+        }
+
+        Ok(())
     }
 }

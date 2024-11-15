@@ -31,4 +31,7 @@ pub enum BleApi {
 
     //Read host info
     HostInfo(BleQuery),
+
+    //Mobile PnP ID
+    MobilePnpId(BleCmd)
 }
