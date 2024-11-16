@@ -110,10 +110,6 @@ pub async fn device_props(
                     if let Err(e) = adapter.remove_device(addr).await {
                         info!("Failed to remove device: {:?}", e);
                     }
-
-                   // if let Err(e)  = send_mobile_disconnected(server_conn.clone(), addr.to_string()).await{
-                   //     info!("Failed to send mobile disconnected: {:?}", e);
-                   // }
                 }
             }
 

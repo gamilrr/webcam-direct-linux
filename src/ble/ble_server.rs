@@ -75,7 +75,6 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
         }
 
         BleApi::RegisterMobile(cmd) => {
-            info!("Mobile registered: {:?}", cmd.addr);
             if let Err(_) = cmd
                 .resp
                 .send(comm_handler.set_register_mobile(cmd.addr, cmd.payload))
@@ -85,7 +84,6 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
         }
 
         BleApi::HostInfo(query) => {
-            info!("Host info requested by: {:?}", query.addr);
             if let Err(e) = query.resp.send(
                 comm_handler.read_host_info(query.addr, query.max_buffer_len),
             ) {
@@ -94,7 +92,6 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
         }
 
         BleApi::MobilePnpId(cmd) => {
-            info!("Mobile PnP ID");
             if let Err(_) = cmd
                 .resp
                 .send(comm_handler.set_mobile_pnp_id(cmd.addr, cmd.payload))

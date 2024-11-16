@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use log::info;
+use log::{error, info};
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -52,32 +52,23 @@ pub trait AppDataStore: Send + Sync + 'static {
     ///
     /// Returns an error if the host information is not found in the data store.
     fn add_mobile(&mut self, mobile: &MobileSchema) -> Result<()>;
+
+    fn get_mobile(&self, id: &str) -> Result<MobileSchema>;
 }
 
-//This is a enum bc we only do a single operation at a time,
-//if a new operation is requested, it will overwrite the previous one
-//turn into a hash map to keep track of parallel operations, not currently used
-//
 //States:
-//Provisioning: ReadHostInfo->WriteMobileInfo->ReadyToStream
-//Identification: WriteMobileId->ReadyToStream
+//Provisioning:  ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
+//Identification:WriteMobileId->ReadyToStream
 //
-#[derive(Default, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 enum MobileDataState {
-    ReadHostInfo {
-        remain_len: usize,
-    },
+    ReadHostInfo { remain_len: usize },
 
-    WriteMobileInfo {
-        current_buffer: String,
-    },
+    WriteMobileInfo { current_buffer: String },
 
-    WriteMobileId {
-        current_buffer: String,
-    },
+    WriteMobileId { current_buffer: String },
 
-    #[default]
-    Idle,
+    ReadyToStream,
 }
 
 type MobileMap = HashMap<Address, MobileDataState>;
@@ -95,96 +86,12 @@ impl<Db: AppDataStore> MobileComm<Db> {
 
         Ok(Self { db, connected: HashMap::new(), host_info })
     }
-
-//    fn process_write<T>(
-//        &mut self, state: MobileDataState, addr: Address,
-//        callback: impl FnOnce(&str) -> Result<BleBuffer>,
-//        ) -> Result<()> {
-//
-//        //check if the mobile is connected or ready for the next op
-//        match self.connected.get(&addr) {
-//            Some(T{ .. }) => {}
-//            _ => {
-//                self.connected.insert(
-//                    addr.clone(),
-//                    MobileDataState::WriteMobileInfo {
-//                        current_buffer: String::new(),
-//                    },
-//                    );
-//            }
-//        }
-//
-//        if let MobileDataState::WriteMobileInfo { current_buffer } = self
-//            .connected
-//                .get_mut(&addr)
-//                .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
-//                {
-//                    let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
-//
-//                    info!("buff_comm {:?}", buff_comm);
-//
-//                    current_buffer.push_str(&buff_comm.payload);
-//
-//                    info!("current_buffer {:?}", buff_comm);
-//
-//                    if buff_comm.remain_len == 0 {
-//                        let mobile = serde_json::from_str(&current_buffer)?;
-//                        self.db.add_mobile(&mobile)?;
-//                        info!("Mobile registered: {:?}", mobile);
-//                    }
-//                }
-//
-//        Ok(())
-// }
-
-
 }
 
 impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn device_disconnected(&mut self, addr: Address) -> Result<()> {
-        info!("Mobile disconnected: {:?}", addr);
+        info!("Removing {:?} from connected devices", addr);
         self.connected.remove(&addr);
-        Ok(())
-    }
-
-    fn set_register_mobile(
-        &mut self, addr: Address, data: BleBuffer,
-    ) -> Result<()> {
-        info!("Registering mobile: {:?}", addr);
-
-        //check if the mobile is connected or ready for the next op
-        match self.connected.get(&addr) {
-            Some(MobileDataState::WriteMobileInfo { .. }) => {}
-            _ => {
-                self.connected.insert(
-                    addr.clone(),
-                    MobileDataState::WriteMobileInfo {
-                        current_buffer: String::new(),
-                    },
-                );
-            }
-        }
-
-        if let MobileDataState::WriteMobileInfo { current_buffer } = self
-            .connected
-            .get_mut(&addr)
-            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
-        {
-            let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
-
-            info!("buff_comm {:?}", buff_comm);
-
-            current_buffer.push_str(&buff_comm.payload);
-
-            info!("current_buffer {:?}", buff_comm);
-
-            if buff_comm.remain_len == 0 {
-                let mobile = serde_json::from_str(&current_buffer)?;
-                self.db.add_mobile(&mobile)?;
-                info!("Mobile registered: {:?}", mobile);
-            }
-        }
-
         Ok(())
     }
 
@@ -195,15 +102,13 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
 
         let total_len = self.host_info.len();
 
-        //check if the mobile is connected or ready for the next op
-        match self.connected.get(&addr) {
-            Some(MobileDataState::ReadHostInfo { .. }) => {}
-            _ => {
-                self.connected.insert(
-                    addr.clone(),
-                    MobileDataState::ReadHostInfo { remain_len: total_len },
-                );
-            }
+        //if mobile is not connected, add it with the state ReadHostInfo
+        //start condition
+        if !self.connected.contains_key(&addr) {
+            self.connected.insert(
+                addr.clone(),
+                MobileDataState::ReadHostInfo { remain_len: total_len },
+            );
         }
 
         if let MobileDataState::ReadHostInfo { remain_len } = self
@@ -215,6 +120,15 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
 
             let ble_comm = if max_buffer_len >= *remain_len {
                 *remain_len = total_len;
+                //move to next state
+                self.connected.insert(
+                    addr.clone(),
+                    MobileDataState::WriteMobileInfo {
+                        current_buffer: "".to_string(),
+                    },
+                );
+                info!("Mobile: {:#?} in state WriteMobileInfo", addr);
+
                 BufferComm {
                     remain_len: 0,
                     payload: self.host_info[initial_len..total_len].to_owned(),
@@ -237,22 +151,57 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         Err(anyhow!("Mobile is not reading host info"))
     }
 
-    fn set_mobile_pnp_id(
+    fn set_register_mobile(
         &mut self, addr: Address, data: BleBuffer,
     ) -> Result<()> {
-        info!("Mobile PnP ID: {:?}", addr);
+        info!("Registering mobile: {:?}", addr);
 
-        //check if the mobile is connected or ready for the next op
-        match self.connected.get(&addr) {
-            Some(MobileDataState::WriteMobileId { .. }) => {}
-            _ => {
+        if let MobileDataState::WriteMobileInfo { current_buffer } = self
+            .connected
+            .get_mut(&addr)
+            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+        {
+            let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
+
+            info!("buff_comm {:?}", buff_comm);
+
+            current_buffer.push_str(&buff_comm.payload);
+
+            info!("current_buffer {:?}", buff_comm);
+
+            if buff_comm.remain_len == 0 {
+                let mobile = serde_json::from_str(&current_buffer)?;
+                self.db.add_mobile(&mobile)?;
+                info!("Mobile registered: {:?}", mobile);
+                //move to next state
                 self.connected.insert(
                     addr.clone(),
                     MobileDataState::WriteMobileId {
                         current_buffer: String::new(),
                     },
                 );
+                info!("Mobile: {:#?} in state WriteMobileId", mobile);
             }
+        } else {
+            return Err(anyhow!("Mobile is not writing mobile info"));
+        }
+
+        Ok(())
+    }
+
+    fn set_mobile_pnp_id(
+        &mut self, addr: Address, data: BleBuffer,
+    ) -> Result<()> {
+        info!("Mobile PnP ID: {:?}", addr);
+
+        if !self.connected.contains_key(&addr) {
+            //new conection, already registered
+            self.connected.insert(
+                addr.clone(),
+                MobileDataState::WriteMobileId {
+                    current_buffer: String::new(),
+                },
+            );
         }
 
         if let MobileDataState::WriteMobileId { current_buffer } = self
@@ -269,9 +218,18 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
             info!("current_buffer {:?}", buff_comm);
 
             if buff_comm.remain_len == 0 {
-                let mobile_id = current_buffer;
+                let mobile_id = current_buffer.clone();
+                if let Ok(mobile) = self.db.get_mobile(&mobile_id) {
+                    info!("Mobile: {:#?} found", mobile);
+                    //move to next State
+                    self.connected
+                        .insert(addr.clone(), MobileDataState::ReadyToStream);
 
-                info!("Mobile id: {mobile_id}");
+                    info!("Mobile: {:#?} in state ReadyToStream", mobile);
+                } else {
+                    error!("Mobile with id: {current_buffer} not found");
+                    return Err(anyhow!("Mobile not found"));
+                }
             }
         }
 

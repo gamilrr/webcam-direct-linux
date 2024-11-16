@@ -1,11 +1,8 @@
 mod access_point_ctl;
 mod app_data;
-mod app_data_store;
 mod ble;
 mod error;
 mod gatt_const;
-mod provisioner;
-mod sdp_exchanger;
 
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},

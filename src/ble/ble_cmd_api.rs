@@ -33,5 +33,5 @@ pub enum BleApi {
     HostInfo(BleQuery),
 
     //Mobile PnP ID
-    MobilePnpId(BleCmd)
+    MobilePnpId(BleCmd),
 }

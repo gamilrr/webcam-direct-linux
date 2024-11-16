@@ -97,6 +97,15 @@ where
         error!("Failed to add mobile device: Host info not found.");
         Err(anyhow!("Host info not found"))
     }
+
+    fn get_mobile(&self, id: &str) -> Result<MobileSchema> {
+        if let Some(mobile) = self.data_db.read::<MobileSchema>(id)? {
+            info!("Mobile info retrieved successfully.");
+            return Ok(mobile);
+        }
+        error!("Failed to retrieve mobile info: Mobile info not found.");
+        Err(anyhow!("Mobile info not found"))
+    }
 }
 
 #[cfg(test)]

@@ -1,12 +1,11 @@
+use crate::ble::ble_cmd_api::{BleApi, BleCmd};
 use crate::ble::ble_server::ServerConn;
 use crate::gatt_const::{
     SDP_NOTIFY_CHAR_UUID, SDP_WRITE_CHAR_UUID, WEBCAM_PNP_WRITE_CHAR_UUID,
 };
 use bluer::adv::Advertisement;
 use bluer::gatt::local::{
-    Application, Characteristic, CharacteristicNotify,
-    CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite,
-    CharacteristicWriteMethod, Service,
+    Application, Characteristic, CharacteristicNotify, CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite, CharacteristicWriteMethod, ReqError, Service
 };
 use bluer::Uuid;
 use bluer::{
@@ -117,11 +116,31 @@ async fn sdp_exchanger(
                         write_without_response: false,
                         method: CharacteristicWriteMethod::Fun(Box::new(
                             move |new_value, req| {
+                                //prepare the request to send to the server
+                                let (tx, rx) = oneshot::channel();
+                                let cmd = BleApi::MobilePnpId(BleCmd {
+                                    addr: req.device_address.to_string(),
+                                    payload: new_value,
+                                    resp: tx,
+                                });
+
+                                let writer_server_conn =
+                                    writer_server_conn.clone();
                                 async move {
-                                    info!(
-                                        "SDP Read Received new value: {:?}",
-                                        new_value
-                                    );
+                                    if let Err(_) = writer_server_conn.send(cmd).await {
+                                        error!("Error sending mobile pnp id request");
+                                        return Err(ReqError::Failed);
+                                    }
+                                    if let Ok(resp) = rx.await {
+                                        if let Err(_) = resp {
+                                            error!("Error mobile is not registered");
+                                            return Err(ReqError::Failed);
+                                        } 
+                                    } else {
+                                        error!("Error receiving mobile pnp id response");
+                                        return Err(ReqError::Failed);
+                                    }
+
                                     Ok(())
                                 }
                                 .boxed()
