@@ -6,9 +6,10 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ble_cmd_api::{Address, BleBuffer},
+    ble_cmd_api::{Address, BleBuffer, SubSender},
     ble_server::MultiMobileCommService,
 };
+use crate::vcam::VCamDevice;
 use crate::{app_data::MobileSchema, error::Result};
 
 #[cfg(test)]
@@ -60,15 +61,28 @@ pub trait AppDataStore: Send + Sync + 'static {
 //Provisioning:  ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
 //Identification:WriteMobileId->ReadyToStream
 //
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 enum MobileDataState {
-    ReadHostInfo { remain_len: usize },
+    ReadHostInfo {
+        remain_len: usize,
+    },
 
-    WriteMobileInfo { current_buffer: String },
+    WriteMobileInfo {
+        current_buffer: String,
+    },
 
-    WriteMobileId { current_buffer: String },
+    WriteMobileId {
+        current_buffer: String,
+    },
 
-    ReadyToStream,
+    InitVirtualDevice {
+        virtual_device: VCamDevice,
+    },
+
+    ReadyToStream {
+        virtual_device: VCamDevice,
+        publisher: SubSender<BleBuffer>,
+    },
 }
 
 type MobileMap = HashMap<Address, MobileDataState>;
@@ -90,8 +104,12 @@ impl<Db: AppDataStore> MobileComm<Db> {
 
 impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn device_disconnected(&mut self, addr: Address) -> Result<()> {
-        info!("Removing {:?} from connected devices", addr);
-        self.connected.remove(&addr);
+        if let Some(_) = self.connected.remove(&addr) {
+            info!("Removing device with addr {}", addr);
+        } else {
+            error!("Mobile not found in connected devices");
+            return Err(anyhow!("Mobile not found"));
+        }
         Ok(())
     }
 
@@ -192,10 +210,10 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn set_mobile_pnp_id(
         &mut self, addr: Address, data: BleBuffer,
     ) -> Result<()> {
-        info!("Mobile PnP ID: {:?}", addr);
+        info!("Mobile Pnp ID: {:?}", addr);
 
         if !self.connected.contains_key(&addr) {
-            //new conection, already registered
+            //new connection, already registered
             self.connected.insert(
                 addr.clone(),
                 MobileDataState::WriteMobileId {
@@ -222,8 +240,13 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 if let Ok(mobile) = self.db.get_mobile(&mobile_id) {
                     info!("Mobile: {:#?} found", mobile);
                     //move to next State
-                    self.connected
-                        .insert(addr.clone(), MobileDataState::ReadyToStream);
+                    self.connected.insert(
+                        addr.clone(),
+                        MobileDataState::InitVirtualDevice {
+                            //TODO: create a virtual device
+                            virtual_device: VCamDevice::new("vcam".to_string()),
+                        },
+                    );
 
                     info!("Mobile: {:#?} in state ReadyToStream", mobile);
                 } else {
@@ -231,6 +254,25 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                     return Err(anyhow!("Mobile not found"));
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    fn sdp_call_sub(
+        &mut self, addr: String, sender: SubSender<BleBuffer>,
+    ) -> Result<()> {
+
+        if let MobileDataState::InitVirtualDevice { virtual_device } = self
+            .connected
+            .get_mut(&addr)
+            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+        {
+            //move to next state
+
+            info!("Mobile: {:#?} in state ReadyToStream", addr);
+        }else{
+            return Err(anyhow!("Mobile not in InitVirtualDevice state"));
         }
 
         Ok(())

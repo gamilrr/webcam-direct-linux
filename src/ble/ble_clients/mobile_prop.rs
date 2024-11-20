@@ -6,6 +6,7 @@ use crate::{
     },
     error::Result,
 };
+use anyhow::anyhow;
 use bluer::{Adapter, AdapterEvent, DeviceEvent, DeviceProperty};
 use futures::{pin_mut, stream::SelectAll, StreamExt};
 use log::info;
@@ -36,22 +37,18 @@ async fn send_mobile_disconnected(
 ) -> Result<()> {
     let (tx, rx) = oneshot::channel();
 
-    if let Ok(_) = server_conn
+    if let Err(e) = server_conn
         .send(BleApi::MobileDisconnected(BleCmd {
-            addr,
+            addr: addr.clone(),
             payload: vec![],
             resp: tx,
         }))
         .await
     {
-        if let Ok(_) = rx.await {
-            info!("Mobile disconnected sent");
-        } else {
-            info!("Mobile disconnected failed");
-        }
+        return Err(anyhow!("Failed to send mobile disconnected: {:?}", e));
     }
 
-    Ok(())
+    rx.await?
 }
 
 pub async fn device_props(
@@ -70,7 +67,7 @@ pub async fn device_props(
             Some(device_event) = device_events.next() => {
                 match device_event {
                     AdapterEvent::DeviceAdded(addr) => {
-                        info!("Device added from query_device: {addr}");
+                        info!("Device added to the adapter {addr}");
 
                         let device = adapter.device(addr)?;
 
@@ -94,9 +91,6 @@ pub async fn device_props(
 
                     AdapterEvent::DeviceRemoved(addr) => {
                         info!("Device removed: {addr}");
-                        if let Err(e)  = send_mobile_disconnected(server_conn.clone(), addr.to_string()).await{
-                            info!("Failed to send mobile disconnected: {:?}", e);
-                        }
                     }
                     _ => (),
                 }
@@ -106,8 +100,9 @@ pub async fn device_props(
                 info!("Property Device changed: {addr}");
                 info!("    {property:?}");
                 if let DeviceProperty::Connected(false) = property {
-                    //remove the device from the connected list
-                    if let Err(e) = adapter.remove_device(addr).await {
+                    if let Err(e)  = send_mobile_disconnected(server_conn.clone(), addr.to_string()).await{
+                        info!("Failed to send mobile disconnected: {:?}", e);
+                    } else if let Err(e) = adapter.remove_device(addr).await {
                         info!("Failed to remove device: {:?}", e);
                     }
                 }

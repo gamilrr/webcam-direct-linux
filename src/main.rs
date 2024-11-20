@@ -3,6 +3,7 @@ mod app_data;
 mod ble;
 mod error;
 mod gatt_const;
+mod vcam;
 
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},

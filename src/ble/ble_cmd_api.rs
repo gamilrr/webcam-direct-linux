@@ -1,8 +1,9 @@
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 pub type Address = String;
 pub type BleBuffer = Vec<u8>;
 pub type Responder<T> = oneshot::Sender<T>;
+pub type SubSender<T> = mpsc::Sender<T>;
 
 use crate::error::Result;
 
@@ -20,6 +21,12 @@ pub struct BleCmd {
     pub resp: Responder<Result<()>>,
 }
 
+#[derive(Debug)]
+pub struct BleSub {
+    pub addr: Address,
+    pub req: SubSender<BleBuffer>,
+}
+
 //Ble Server-Client request
 #[derive(Debug)]
 pub enum BleApi {
@@ -32,6 +39,9 @@ pub enum BleApi {
     //Read host info
     HostInfo(BleQuery),
 
-    //Mobile PnP ID
+    //Mobile Pnp ID
     MobilePnpId(BleCmd),
+
+    //Sdp call request
+    SdpCall(BleSub),
 }

@@ -6,7 +6,7 @@ use crate::error::Result;
 #[cfg(test)]
 use mockall::automock;
 
-use super::ble_cmd_api::{BleApi, BleBuffer};
+use super::ble_cmd_api::{BleApi, BleBuffer, SubSender};
 
 //trait
 #[cfg_attr(test, automock)]
@@ -14,6 +14,7 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
     fn set_register_mobile(
         &mut self, addr: String, data: BleBuffer,
     ) -> Result<()>;
+
     fn read_host_info(
         &mut self, addr: String, max_size: usize,
     ) -> Result<BleBuffer>;
@@ -22,6 +23,12 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
     fn set_mobile_pnp_id(
         &mut self, addr: String, data: BleBuffer,
     ) -> Result<()>;
+
+    fn sdp_call_sub(
+        &mut self, addr: String, sender: SubSender<BleBuffer>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type ServerConn = mpsc::Sender<BleApi>;
@@ -96,7 +103,13 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
                 .resp
                 .send(comm_handler.set_mobile_pnp_id(cmd.addr, cmd.payload))
             {
-                error!("Error setting mobile PnP ID");
+                error!("Error setting mobile Pnp Id");
+            }
+        }
+
+        BleApi::SdpCall(sub) => {
+            if let Err(e) = comm_handler.sdp_call_sub(sub.addr, sub.req) {
+                error!("Error setting sdp call sub: {:?}", e);
             }
         }
 
