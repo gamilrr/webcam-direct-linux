@@ -75,8 +75,8 @@ enum MobileDataState {
         current_buffer: String,
     },
 
-    InitVirtualDevice {
-        virtual_device: VCamDevice,
+    SaveMobileData {
+        mobile: MobileSchema,
     },
 
     ReadyToStream {
@@ -242,13 +242,8 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                     //move to next State
                     self.connected.insert(
                         addr.clone(),
-                        MobileDataState::InitVirtualDevice {
-                            //TODO: create a virtual device
-                            virtual_device: VCamDevice::new("vcam".to_string()),
-                        },
+                        MobileDataState::SaveMobileData { mobile },
                     );
-
-                    info!("Mobile: {:#?} in state ReadyToStream", mobile);
                 } else {
                     error!("Mobile with id: {current_buffer} not found");
                     return Err(anyhow!("Mobile not found"));
@@ -262,17 +257,20 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn sdp_call_sub(
         &mut self, addr: String, sender: SubSender<BleBuffer>,
     ) -> Result<()> {
-
-        if let MobileDataState::InitVirtualDevice { virtual_device } = self
-            .connected
-            .get_mut(&addr)
-            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+        info!("SDP call sub: {:?}", addr);
+        if let Some(MobileDataState::SaveMobileData { mobile }) =
+            self.connected.remove(&addr)
         {
             //move to next state
-
-            info!("Mobile: {:#?} in state ReadyToStream", addr);
-        }else{
-            return Err(anyhow!("Mobile not in InitVirtualDevice state"));
+            self.connected.insert(
+                addr.clone(),
+                MobileDataState::ReadyToStream {
+                    virtual_device: VCamDevice::new(mobile),
+                    publisher: sender,
+                },
+            );
+        } else {
+            return Err(anyhow!("Mobile not found in connected devices"));
         }
 
         Ok(())
