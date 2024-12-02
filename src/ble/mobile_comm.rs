@@ -59,23 +59,34 @@ pub trait AppDataStore: Send + Sync + 'static {
 }
 
 //States:
-//Provisioning:  ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
-//Identification:WriteMobileId->ReadyToStream
+//Provisioning:   ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
+//Identification: WriteMobileId->ReadyToStream
 //
 #[derive(Debug)]
 enum MobileDataState {
-    ReadHostInfo { remain_len: usize },
+    ReadHostInfo,
 
-    WriteMobileInfo { current_buffer: String },
+    WriteMobileInfo,
 
-    WriteMobileId { current_buffer: String },
+    WriteMobileId,
 
     SaveMobileData { mobile: MobileSchema },
 
-    ReadyToStream { current_buffer: String, virtual_device: VCamDevice },
+    ReadyToStream { virtual_device: VCamDevice },
 }
 
-type MobileMap = HashMap<Address, MobileDataState>;
+//State for the communication buffer
+enum CommBufferStatus {
+    RemainLen(usize),      //used in queries
+    CurrentBuffer(String), //used in commands
+}
+
+struct ConnectedMobileData {
+    pub mobile_state: MobileDataState,
+    pub buffer_status: Option<CommBufferStatus>,
+}
+
+type MobileMap = HashMap<Address, ConnectedMobileData>;
 
 //caller to send SDP data as a publisher
 //to all mobiles subscribed
@@ -134,24 +145,33 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         if !self.mobiles_connected.contains_key(&addr) {
             self.mobiles_connected.insert(
                 addr.clone(),
-                MobileDataState::ReadHostInfo { remain_len: total_len },
+                ConnectedMobileData {
+                    mobile_state: MobileDataState::ReadHostInfo,
+                    buffer_status: Some(CommBufferStatus::RemainLen(total_len)),
+                },
             );
         }
 
-        if let MobileDataState::ReadHostInfo { remain_len } = self
+        if let ConnectedMobileData {
+            mobile_state: MobileDataState::ReadHostInfo,
+            buffer_status: Some(CommBufferStatus::RemainLen(remain)),
+        } = self
             .mobiles_connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
-            let initial_len = total_len - *remain_len;
+            let initial_len = total_len - *remain;
 
-            let ble_comm = if max_buffer_len >= *remain_len {
-                *remain_len = total_len;
+            let ble_comm = if max_buffer_len >= *remain {
+                *remain = total_len;
                 //move to next state
                 self.mobiles_connected.insert(
                     addr.clone(),
-                    MobileDataState::WriteMobileInfo {
-                        current_buffer: "".to_string(),
+                    ConnectedMobileData {
+                        mobile_state: MobileDataState::WriteMobileInfo,
+                        buffer_status: Some(CommBufferStatus::CurrentBuffer(
+                            "".to_string(),
+                        )),
                     },
                 );
                 info!("Mobile: {:?} in state WriteMobileInfo", addr);
@@ -161,9 +181,9 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                     payload: self.host_info[initial_len..total_len].to_owned(),
                 }
             } else {
-                *remain_len -= max_buffer_len;
+                *remain -= max_buffer_len;
                 BufferComm {
-                    remain_len: *remain_len,
+                    remain_len: *remain,
                     payload: self.host_info
                         [initial_len..initial_len + max_buffer_len]
                         .to_owned(),
@@ -183,7 +203,10 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     ) -> Result<()> {
         info!("Registering mobile: {:?}", addr);
 
-        if let MobileDataState::WriteMobileInfo { current_buffer } = self
+        if let ConnectedMobileData {
+            mobile_state: MobileDataState::WriteMobileInfo,
+            buffer_status: Some(CommBufferStatus::CurrentBuffer(current_buffer)),
+        } = self
             .mobiles_connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
@@ -203,8 +226,11 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 //move to next state
                 self.mobiles_connected.insert(
                     addr.clone(),
-                    MobileDataState::WriteMobileId {
-                        current_buffer: String::new(),
+                    ConnectedMobileData {
+                        mobile_state: MobileDataState::WriteMobileId,
+                        buffer_status: Some(CommBufferStatus::CurrentBuffer(
+                            "".to_string(),
+                        )),
                     },
                 );
                 info!("Mobile: {:#?} in state WriteMobileId", mobile);
@@ -225,13 +251,19 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
             //new connection, already registered
             self.mobiles_connected.insert(
                 addr.clone(),
-                MobileDataState::WriteMobileId {
-                    current_buffer: String::new(),
+                ConnectedMobileData {
+                    mobile_state: MobileDataState::WriteMobileId,
+                    buffer_status: Some(CommBufferStatus::CurrentBuffer(
+                        "".to_string(),
+                    )),
                 },
             );
         }
 
-        if let MobileDataState::WriteMobileId { current_buffer } = self
+        if let ConnectedMobileData {
+            mobile_state: MobileDataState::WriteMobileId,
+            buffer_status: Some(CommBufferStatus::CurrentBuffer(current_buffer)),
+        } = self
             .mobiles_connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
@@ -251,7 +283,12 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                     //move to next State
                     self.mobiles_connected.insert(
                         addr.clone(),
-                        MobileDataState::SaveMobileData { mobile },
+                        ConnectedMobileData {
+                            mobile_state: MobileDataState::SaveMobileData {
+                                mobile,
+                            },
+                            buffer_status: None,
+                        },
                     );
                 } else {
                     error!("Mobile with id: {current_buffer} not found");
@@ -266,17 +303,23 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn subscribe_to_sdp_req(
         &mut self, addr: String, max_size: usize,
     ) -> Result<PubSubSubscriber> {
-        if let Some(MobileDataState::SaveMobileData { mobile }) =
-            self.mobiles_connected.remove(&addr)
+        if let Some(ConnectedMobileData {
+            mobile_state: MobileDataState::SaveMobileData { mobile },
+            buffer_status: None,
+        }) = self.mobiles_connected.remove(&addr)
         {
             info!("Mobile: {:#?} is subscribe to SDP call", mobile);
 
             //move to next state
             self.mobiles_connected.insert(
                 addr.clone(),
-                MobileDataState::ReadyToStream {
-                    virtual_device: VCamDevice::new(mobile),
-                    current_buffer: String::new(),
+                ConnectedMobileData {
+                    mobile_state: MobileDataState::ReadyToStream {
+                        virtual_device: VCamDevice::new(mobile),
+                    },
+                    buffer_status: Some(CommBufferStatus::CurrentBuffer(
+                        "".to_string(),
+                    )),
                 },
             );
 
@@ -294,9 +337,9 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn set_mobile_sdp_resp(
         &mut self, addr: String, data: BleBuffer,
     ) -> Result<()> {
-        if let MobileDataState::ReadyToStream {
-            current_buffer,
-            virtual_device,
+        if let ConnectedMobileData {
+            mobile_state: MobileDataState::ReadyToStream { .. },
+            buffer_status: Some(CommBufferStatus::CurrentBuffer(current_buffer)),
         } = self
             .mobiles_connected
             .get_mut(&addr)
@@ -323,3 +366,5 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         Ok(())
     }
 }
+
+impl<Db: AppDataStore> MobileComm<Db> {}

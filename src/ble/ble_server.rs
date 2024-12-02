@@ -40,14 +40,6 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
 
 pub type ServerConn = mpsc::Sender<BleApi>;
 
-//HashMap to store the topics and their respective senders
-struct ServerPublisher {
-    pub publisher: PubSubPublisher,
-    pub max_buffer_len: usize,
-}
-
-type PubSubTopicMap = HashMap<PubSubTopic, ServerPublisher>;
-
 pub struct BleServer {
     ble_tx: ServerConn,
     _drop_tx: oneshot::Sender<()>,
