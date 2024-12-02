@@ -1,12 +1,17 @@
+use std::collections::HashMap;
+
 use log::{error, info};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::error::Result;
+use anyhow::anyhow;
 
 #[cfg(test)]
 use mockall::automock;
 
-use super::ble_cmd_api::{BleApi, BleBuffer, SubSender};
+use super::ble_cmd_api::{
+    BleApi, BleBuffer, PubSubPublisher, PubSubSubscriber, PubSubTopic,
+};
 
 //trait
 #[cfg_attr(test, automock)]
@@ -24,14 +29,24 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, data: BleBuffer,
     ) -> Result<()>;
 
-    fn sdp_call_sub(
-        &mut self, addr: String, sender: SubSender<BleBuffer>,
-    ) -> Result<()> {
-        Ok(())
-    }
+    fn subscribe_to_sdp_req(
+        &mut self, addr: String, max_size: usize,
+    ) -> Result<PubSubSubscriber>;
+
+    fn set_mobile_sdp_resp(
+        &mut self, addr: String, data: BleBuffer,
+    ) -> Result<()>;
 }
 
 pub type ServerConn = mpsc::Sender<BleApi>;
+
+//HashMap to store the topics and their respective senders
+struct ServerPublisher {
+    pub publisher: PubSubPublisher,
+    pub max_buffer_len: usize,
+}
+
+type PubSubTopicMap = HashMap<PubSubTopic, ServerPublisher>;
 
 pub struct BleServer {
     ble_tx: ServerConn,
@@ -44,7 +59,7 @@ impl BleServer {
     ) -> Self {
         let (ble_tx, mut ble_rx) = mpsc::channel(req_buffer_size);
 
-        let (drop_tx, mut drop_rx) = oneshot::channel();
+        let (_drop_tx, mut _drop_rx) = oneshot::channel();
 
         tokio::spawn(async move {
             loop {
@@ -52,7 +67,7 @@ impl BleServer {
                     Some(req) = ble_rx.recv() => {
                        handle_request(&mut comm_handler, req);
                     }
-                    _ = &mut drop_rx => {
+                    _ = &mut _drop_rx => {
                         info!("MobileManager task is stopping");
                         break;
                     }
@@ -60,7 +75,7 @@ impl BleServer {
             }
         });
 
-        Self { ble_tx, _drop_tx: drop_tx }
+        Self { ble_tx, _drop_tx }
     }
 
     pub fn connection(&self) -> ServerConn {
@@ -82,11 +97,14 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
         }
 
         BleApi::RegisterMobile(cmd) => {
-            if let Err(_) = cmd
+            if let Err(e) = cmd
                 .resp
                 .send(comm_handler.set_register_mobile(cmd.addr, cmd.payload))
             {
-                error!("Error sending mobile registration response");
+                error!(
+                    "Error sending mobile registration response error: {:?}",
+                    e
+                );
             }
         }
 
@@ -99,22 +117,42 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
         }
 
         BleApi::MobilePnpId(cmd) => {
-            if let Err(_) = cmd
+            if let Err(e) = cmd
                 .resp
                 .send(comm_handler.set_mobile_pnp_id(cmd.addr, cmd.payload))
             {
-                error!("Error setting mobile Pnp Id");
+                error!("Error setting mobile Pnp Id error: {:?}", e);
             }
         }
 
-        BleApi::SdpCall(sub) => {
-            if let Err(e) = comm_handler.sdp_call_sub(sub.addr, sub.req) {
-                error!("Error setting sdp call sub: {:?}", e);
+        BleApi::MobileSdpResponse(cmd) => {
+            if let Err(e) = cmd
+                .resp
+                .send(comm_handler.set_mobile_sdp_resp(cmd.addr, cmd.payload))
+            {
+                error!("Error setting mobile sdp response error: {:?}", e);
             }
         }
 
+        BleApi::Subscribe(topic, sub) => {
+            //initialize the topic with the first subscriber
+            match topic {
+                PubSubTopic::SdpCall => {
+                    //process subscribe
+                    if let Err(e) = sub.resp.send(
+                        comm_handler
+                            .subscribe_to_sdp_req(sub.addr, sub.max_buffer_len),
+                    ) {
+                        error!(
+                            "Error sending sdp call sub response, error: {:?}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
         _ => {
-            info!("Unhandled event: {:?}", req);
+            error!("Not handle request: {:?}", req);
         }
     };
 }

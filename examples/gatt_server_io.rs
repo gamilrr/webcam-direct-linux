@@ -4,20 +4,21 @@ use bluer::{
     adv::Advertisement,
     gatt::{
         local::{
-            characteristic_control, service_control, Application, Characteristic, CharacteristicControlEvent,
-            CharacteristicNotify, CharacteristicNotifyMethod, CharacteristicWrite, CharacteristicWriteMethod,
-            Service,
+            characteristic_control, service_control, Application,
+            Characteristic, CharacteristicControlEvent, CharacteristicNotify,
+            CharacteristicNotifyMethod, CharacteristicWrite,
+            CharacteristicWriteMethod, Service,
         },
         CharacteristicReader, CharacteristicWriter,
     },
 };
 use futures::{future, pin_mut, StreamExt};
+use log::info;
 use std::{collections::BTreeMap, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     time::{interval, sleep},
 };
-use log::info;
 
 /// Service UUID for GATT example.
 const SERVICE_UUID: uuid::Uuid = uuid::Uuid::from_u128(0xFEEDC0DE00002);
@@ -32,7 +33,11 @@ async fn main() -> bluer::Result<()> {
     let adapter = session.default_adapter().await?;
     adapter.set_powered(true).await?;
 
-    info!("Advertising on Bluetooth adapter {} with address {}", adapter.name(), adapter.address().await?);
+    info!(
+        "Advertising on Bluetooth adapter {} with address {}",
+        adapter.name(),
+        adapter.address().await?
+    );
     let le_advertisement = Advertisement {
         service_uuids: vec![SERVICE_UUID].into_iter().collect(),
         discoverable: Some(true),
@@ -97,11 +102,14 @@ async fn main() -> bluer::Result<()> {
                     },
                     Some(CharacteristicControlEvent::Notify(notifier)) => {
                         info!("Accepting notify request event with MTU {} from {}", notifier.mtu(), notifier.device_address());
-                        writer_opt = Some(notifier);
+                        if writer_opt.is_none() {
+                           writer_opt = Some(notifier);
+                        }
                     },
                     None => break,
                 }
             }
+
             _ = interval.tick() => {
                 info!("Decrementing each element by one");
                 for v in &mut *value {
@@ -118,7 +126,7 @@ async fn main() -> bluer::Result<()> {
             }
             read_res = async {
                 match &mut reader_opt {
-                    Some(reader) => reader.read(&mut read_buf).await,
+                    Some(reader) => reader.read(&mut read_buf).await ,
                     None => future::pending().await,
                 }
             } => {

@@ -4,9 +4,10 @@ use log::{error, info};
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 
 use super::{
-    ble_cmd_api::{Address, BleBuffer, SubSender},
+    ble_cmd_api::{Address, BleBuffer, PubSubPublisher, PubSubSubscriber},
     ble_server::MultiMobileCommService,
 };
 use crate::vcam::VCamDevice;
@@ -63,34 +64,31 @@ pub trait AppDataStore: Send + Sync + 'static {
 //
 #[derive(Debug)]
 enum MobileDataState {
-    ReadHostInfo {
-        remain_len: usize,
-    },
+    ReadHostInfo { remain_len: usize },
 
-    WriteMobileInfo {
-        current_buffer: String,
-    },
+    WriteMobileInfo { current_buffer: String },
 
-    WriteMobileId {
-        current_buffer: String,
-    },
+    WriteMobileId { current_buffer: String },
 
-    SaveMobileData {
-        mobile: MobileSchema,
-    },
+    SaveMobileData { mobile: MobileSchema },
 
-    ReadyToStream {
-        virtual_device: VCamDevice,
-        publisher: SubSender<BleBuffer>,
-    },
+    ReadyToStream { current_buffer: String, virtual_device: VCamDevice },
 }
 
 type MobileMap = HashMap<Address, MobileDataState>;
 
+//caller to send SDP data as a publisher
+//to all mobiles subscribed
+struct MobileSdpCaller {
+    pub max_buffer_len: usize,
+    pub publisher: PubSubPublisher,
+}
+
 pub struct MobileComm<Db> {
     db: Db,
-    connected: MobileMap,
+    mobiles_connected: MobileMap,
     host_info: String,
+    sdp_caller: MobileSdpCaller,
 }
 
 impl<Db: AppDataStore> MobileComm<Db> {
@@ -98,13 +96,24 @@ impl<Db: AppDataStore> MobileComm<Db> {
         let host = db.get_host_prov_info()?;
         let host_info = serde_json::to_string(&host)?;
 
-        Ok(Self { db, connected: HashMap::new(), host_info })
+        let (sender, _) = broadcast::channel(16);
+        let sdp_caller = MobileSdpCaller {
+            max_buffer_len: 19, //default mtu size 23 - 4 bytes for header
+            publisher: sender,
+        };
+
+        Ok(Self {
+            db,
+            mobiles_connected: HashMap::new(),
+            host_info,
+            sdp_caller,
+        })
     }
 }
 
 impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn device_disconnected(&mut self, addr: Address) -> Result<()> {
-        if let Some(_) = self.connected.remove(&addr) {
+        if let Some(_) = self.mobiles_connected.remove(&addr) {
             info!("Removing device with addr {}", addr);
         } else {
             error!("Mobile not found in connected devices");
@@ -122,15 +131,15 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
 
         //if mobile is not connected, add it with the state ReadHostInfo
         //start condition
-        if !self.connected.contains_key(&addr) {
-            self.connected.insert(
+        if !self.mobiles_connected.contains_key(&addr) {
+            self.mobiles_connected.insert(
                 addr.clone(),
                 MobileDataState::ReadHostInfo { remain_len: total_len },
             );
         }
 
         if let MobileDataState::ReadHostInfo { remain_len } = self
-            .connected
+            .mobiles_connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
@@ -139,13 +148,13 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
             let ble_comm = if max_buffer_len >= *remain_len {
                 *remain_len = total_len;
                 //move to next state
-                self.connected.insert(
+                self.mobiles_connected.insert(
                     addr.clone(),
                     MobileDataState::WriteMobileInfo {
                         current_buffer: "".to_string(),
                     },
                 );
-                info!("Mobile: {:#?} in state WriteMobileInfo", addr);
+                info!("Mobile: {:?} in state WriteMobileInfo", addr);
 
                 BufferComm {
                     remain_len: 0,
@@ -175,7 +184,7 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         info!("Registering mobile: {:?}", addr);
 
         if let MobileDataState::WriteMobileInfo { current_buffer } = self
-            .connected
+            .mobiles_connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
@@ -192,7 +201,7 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 self.db.add_mobile(&mobile)?;
                 info!("Mobile registered: {:?}", mobile);
                 //move to next state
-                self.connected.insert(
+                self.mobiles_connected.insert(
                     addr.clone(),
                     MobileDataState::WriteMobileId {
                         current_buffer: String::new(),
@@ -212,9 +221,9 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     ) -> Result<()> {
         info!("Mobile Pnp ID: {:?}", addr);
 
-        if !self.connected.contains_key(&addr) {
+        if !self.mobiles_connected.contains_key(&addr) {
             //new connection, already registered
-            self.connected.insert(
+            self.mobiles_connected.insert(
                 addr.clone(),
                 MobileDataState::WriteMobileId {
                     current_buffer: String::new(),
@@ -223,7 +232,7 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         }
 
         if let MobileDataState::WriteMobileId { current_buffer } = self
-            .connected
+            .mobiles_connected
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
         {
@@ -240,7 +249,7 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 if let Ok(mobile) = self.db.get_mobile(&mobile_id) {
                     info!("Mobile: {:#?} found", mobile);
                     //move to next State
-                    self.connected.insert(
+                    self.mobiles_connected.insert(
                         addr.clone(),
                         MobileDataState::SaveMobileData { mobile },
                     );
@@ -254,23 +263,61 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         Ok(())
     }
 
-    fn sdp_call_sub(
-        &mut self, addr: String, sender: SubSender<BleBuffer>,
-    ) -> Result<()> {
-        info!("SDP call sub: {:?}", addr);
+    fn subscribe_to_sdp_req(
+        &mut self, addr: String, max_size: usize,
+    ) -> Result<PubSubSubscriber> {
         if let Some(MobileDataState::SaveMobileData { mobile }) =
-            self.connected.remove(&addr)
+            self.mobiles_connected.remove(&addr)
         {
+            info!("Mobile: {:#?} is subscribe to SDP call", mobile);
+
             //move to next state
-            self.connected.insert(
+            self.mobiles_connected.insert(
                 addr.clone(),
                 MobileDataState::ReadyToStream {
                     virtual_device: VCamDevice::new(mobile),
-                    publisher: sender,
+                    current_buffer: String::new(),
                 },
             );
+
+            //update the max buffer len
+            self.sdp_caller.max_buffer_len = max_size;
         } else {
-            return Err(anyhow!("Mobile not found in connected devices"));
+            return Err(anyhow!(
+                "Mobile not ready is not ready to start streaming"
+            ));
+        }
+
+        Ok(self.sdp_caller.publisher.subscribe())
+    }
+
+    fn set_mobile_sdp_resp(
+        &mut self, addr: String, data: BleBuffer,
+    ) -> Result<()> {
+        if let MobileDataState::ReadyToStream {
+            current_buffer,
+            virtual_device,
+        } = self
+            .mobiles_connected
+            .get_mut(&addr)
+            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+        {
+            let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
+
+            info!("buff_comm {:?}", buff_comm);
+
+            current_buffer.push_str(&buff_comm.payload);
+
+            info!("current_buffer {:?}", buff_comm);
+
+            if buff_comm.remain_len == 0 {
+                info!("SDP data: {:?}", current_buffer);
+
+                //parse the sdp data and use it some how
+                //ex: virtual_device.send_sdp_data(&data)?;
+            }
+        } else {
+            return Err(anyhow!("Mobile is not ready to stream"));
         }
 
         Ok(())

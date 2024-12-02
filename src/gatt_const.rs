@@ -9,7 +9,7 @@ pub const PROV_CHAR_MOBILE_INFO_UUID: Uuid =
     Uuid::from_u128(0x124ddac7b10746a0ade04ae8b2b700f5);
 
 //Webrtc SDP offer and answer
-pub const SDP_WRITE_CHAR_UUID: Uuid =
+pub const SDP_EXCHANGE_CHAR_UUID: Uuid =
     Uuid::from_u128(0x124ddac8b10746a0ade04ae8b2b700f5);
 pub const SDP_NOTIFY_CHAR_UUID: Uuid =
     Uuid::from_u128(0x124ddac9b10746a0ade04ae8b2b700f5);
