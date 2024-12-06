@@ -10,7 +10,7 @@ use super::{
     ble_cmd_api::{Address, BleBuffer, PubSubPublisher, PubSubSubscriber},
     ble_server::MultiMobileCommService,
 };
-use crate::vcam::VCamDevice;
+use crate::vdevice::VDevice;
 use crate::{app_data::MobileSchema, error::Result};
 
 #[cfg(test)]
@@ -58,6 +58,9 @@ pub trait AppDataStore: Send + Sync + 'static {
     fn get_mobile(&self, id: &str) -> Result<MobileSchema>;
 }
 
+pub trait VDeviceBuilderOps: Send + Sync + 'static {
+    fn create_from(&self, mobile: MobileSchema) -> Result<Vec<VDevice>>;
+}
 //States:
 //Provisioning:   ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
 //Identification: WriteMobileId->ReadyToStream
@@ -72,7 +75,7 @@ enum MobileDataState {
 
     SaveMobileData { mobile: MobileSchema },
 
-    ReadyToStream { virtual_device: VCamDevice },
+    ReadyToStream { virtual_device: Vec<VDevice> },
 }
 
 //State for the communication buffer
@@ -95,15 +98,18 @@ struct MobileSdpCaller {
     pub publisher: PubSubPublisher,
 }
 
-pub struct MobileComm<Db> {
+pub struct MobileComm<Db, VDevBuilder> {
     db: Db,
     mobiles_connected: MobileMap,
     host_info: String,
     sdp_caller: MobileSdpCaller,
+    vdev_builder: VDevBuilder,
 }
 
-impl<Db: AppDataStore> MobileComm<Db> {
-    pub fn new(db: Db) -> Result<Self> {
+impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
+    MobileComm<Db, VDevBuilder>
+{
+    pub fn new(db: Db, vdev_builder: VDevBuilder) -> Result<Self> {
         let host = db.get_host_prov_info()?;
         let host_info = serde_json::to_string(&host)?;
 
@@ -118,11 +124,14 @@ impl<Db: AppDataStore> MobileComm<Db> {
             mobiles_connected: HashMap::new(),
             host_info,
             sdp_caller,
+            vdev_builder,
         })
     }
 }
 
-impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
+impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
+    for MobileComm<Db, VDevBuilder>
+{
     fn device_disconnected(&mut self, addr: Address) -> Result<()> {
         if let Some(_) = self.mobiles_connected.remove(&addr) {
             info!("Removing device with addr {}", addr);
@@ -303,6 +312,19 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
     fn subscribe_to_sdp_req(
         &mut self, addr: String, max_size: usize,
     ) -> Result<PubSubSubscriber> {
+        //get the virtual device
+        let vdev = if let Some(ConnectedMobileData {
+            mobile_state: MobileDataState::SaveMobileData { mobile },
+            buffer_status: None,
+        }) = self.mobiles_connected.get(&addr)
+        {
+            self.vdev_builder.create_from(mobile.clone())?
+        } else {
+            return Err(anyhow!(
+                "Mobile not found in connected devices or in wrong state"
+            ));
+        };
+
         if let Some(ConnectedMobileData {
             mobile_state: MobileDataState::SaveMobileData { mobile },
             buffer_status: None,
@@ -315,7 +337,7 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
                 addr.clone(),
                 ConnectedMobileData {
                     mobile_state: MobileDataState::ReadyToStream {
-                        virtual_device: VCamDevice::new(mobile),
+                        virtual_device: vdev,
                     },
                     buffer_status: Some(CommBufferStatus::CurrentBuffer(
                         "".to_string(),
@@ -366,5 +388,3 @@ impl<Db: AppDataStore> MultiMobileCommService for MobileComm<Db> {
         Ok(())
     }
 }
-
-impl<Db: AppDataStore> MobileComm<Db> {}

@@ -3,7 +3,7 @@ mod app_data;
 mod ble;
 mod error;
 mod gatt_const;
-mod vcam;
+mod vdevice;
 
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},
@@ -28,6 +28,7 @@ use ble::{
 use tokio::io::AsyncBufReadExt;
 
 use log::info;
+use vdevice::VDeviceBuilder;
 
 fn setup_access_point() -> Result<impl AccessPointCtl> {
     let if_name = "wcdirect0";
@@ -99,7 +100,7 @@ async fn main() -> Result<()> {
 
     let host_prov_info = app_data.get_host_prov_info()?;
 
-    let mobile_comm = MobileComm::new(app_data)?;
+    let mobile_comm = MobileComm::new(app_data, VDeviceBuilder::new().await?)?;
 
     let ble_server = BleServer::new(mobile_comm, 512);
 

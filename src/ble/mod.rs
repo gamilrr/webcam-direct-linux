@@ -3,4 +3,4 @@ mod ble_cmd_api;
 pub mod ble_server;
 mod mobile_comm;
 
-pub use mobile_comm::{AppDataStore, HostProvInfo, MobileComm};
+pub use mobile_comm::{AppDataStore, HostProvInfo, MobileComm, VDeviceBuilderOps};
