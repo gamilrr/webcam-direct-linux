@@ -31,7 +31,8 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
 
     fn subscribe_to_sdp_req(
         &mut self, addr: String, max_size: usize,
-    ) -> Result<PubSubSubscriber>;
+    ) -> impl std::future::Future<Output = Result<PubSubSubscriber>>
+           + std::marker::Send;
 
     fn set_mobile_sdp_resp(
         &mut self, addr: String, data: BleBuffer,
@@ -57,7 +58,7 @@ impl BleServer {
             loop {
                 tokio::select! {
                     Some(req) = ble_rx.recv() => {
-                       handle_request(&mut comm_handler, req);
+                       handle_request(&mut comm_handler, req).await;
                     }
                     _ = &mut _drop_rx => {
                         info!("MobileManager task is stopping");
@@ -77,7 +78,9 @@ impl BleServer {
 
 //This function does not return a Result since every request is successful
 //if internally any operation fails, it should handle it accordingly
-fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
+async fn handle_request(
+    comm_handler: &mut impl MultiMobileCommService, req: BleApi,
+) -> impl Send {
     match req {
         BleApi::MobileDisconnected(cmd) => {
             info!("Mobile disconnected: {:?}", cmd.addr);
@@ -133,7 +136,8 @@ fn handle_request(comm_handler: &mut impl MultiMobileCommService, req: BleApi) {
                     //process subscribe
                     if let Err(e) = sub.resp.send(
                         comm_handler
-                            .subscribe_to_sdp_req(sub.addr, sub.max_buffer_len),
+                            .subscribe_to_sdp_req(sub.addr, sub.max_buffer_len)
+                            .await,
                     ) {
                         error!(
                             "Error sending sdp call sub response, error: {:?}",

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use log::{error, info};
 
@@ -58,8 +58,9 @@ pub trait AppDataStore: Send + Sync + 'static {
     fn get_mobile(&self, id: &str) -> Result<MobileSchema>;
 }
 
+pub type VDeviceMap = HashMap<PathBuf, VDevice>;
 pub trait VDeviceBuilderOps: Send + Sync + 'static {
-    fn create_from(&self, mobile: MobileSchema) -> Result<Vec<VDevice>>;
+    fn create_from(&self, mobile: MobileSchema) -> impl std::future::Future<Output = Result<VDeviceMap>> + std::marker::Send;
 }
 //States:
 //Provisioning:   ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
@@ -75,7 +76,7 @@ enum MobileDataState {
 
     SaveMobileData { mobile: MobileSchema },
 
-    ReadyToStream { virtual_device: Vec<VDevice> },
+    ReadyToStream { virtual_devices: VDeviceMap },
 }
 
 //State for the communication buffer
@@ -89,8 +90,6 @@ struct ConnectedMobileData {
     pub buffer_status: Option<CommBufferStatus>,
 }
 
-type MobileMap = HashMap<Address, ConnectedMobileData>;
-
 //caller to send SDP data as a publisher
 //to all mobiles subscribed
 struct MobileSdpCaller {
@@ -100,7 +99,9 @@ struct MobileSdpCaller {
 
 pub struct MobileComm<Db, VDevBuilder> {
     db: Db,
-    mobiles_connected: MobileMap,
+    mobiles_connected: HashMap<Address, ConnectedMobileData>,
+    //index to get the mobile address from virtual device path
+    vdevice_index: HashMap<PathBuf, Address>,
     host_info: String,
     sdp_caller: MobileSdpCaller,
     vdev_builder: VDevBuilder,
@@ -122,6 +123,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
         Ok(Self {
             db,
             mobiles_connected: HashMap::new(),
+            vdevice_index: HashMap::new(),
             host_info,
             sdp_caller,
             vdev_builder,
@@ -133,8 +135,23 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
     fn device_disconnected(&mut self, addr: Address) -> Result<()> {
-        if let Some(_) = self.mobiles_connected.remove(&addr) {
-            info!("Removing device with addr {}", addr);
+        if let Some(connected_data) = self.mobiles_connected.remove(&addr) {
+            if let MobileDataState::ReadyToStream { virtual_devices } =
+                connected_data.mobile_state
+            {
+                //remove the virtual devices
+                for (path, _) in virtual_devices {
+                    info!("Removing index with path {:?}", path);
+                    if self.vdevice_index.remove(&path).is_none() {
+                        error!("Device not found in vdevice index {:?}", path);
+                    }
+                }
+            }
+
+            info!(
+                "Mobile: {:?} disconnected and removed from connected devices",
+                addr
+            );
         } else {
             error!("Mobile not found in connected devices");
             return Err(anyhow!("Mobile not found"));
@@ -309,16 +326,16 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         Ok(())
     }
 
-    fn subscribe_to_sdp_req(
+    async fn subscribe_to_sdp_req(
         &mut self, addr: String, max_size: usize,
     ) -> Result<PubSubSubscriber> {
         //get the virtual device
-        let vdev = if let Some(ConnectedMobileData {
+        let vdev_map = if let Some(ConnectedMobileData {
             mobile_state: MobileDataState::SaveMobileData { mobile },
             buffer_status: None,
         }) = self.mobiles_connected.get(&addr)
         {
-            self.vdev_builder.create_from(mobile.clone())?
+            self.vdev_builder.create_from(mobile.clone()).await?
         } else {
             return Err(anyhow!(
                 "Mobile not found in connected devices or in wrong state"
@@ -332,12 +349,17 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         {
             info!("Mobile: {:#?} is subscribe to SDP call", mobile);
 
+            //update the index
+            for (path, _) in &vdev_map {
+                self.vdevice_index.insert(path.clone(), addr.clone());
+            }
+
             //move to next state
             self.mobiles_connected.insert(
                 addr.clone(),
                 ConnectedMobileData {
                     mobile_state: MobileDataState::ReadyToStream {
-                        virtual_device: vdev,
+                        virtual_devices: vdev_map,
                     },
                     buffer_status: Some(CommBufferStatus::CurrentBuffer(
                         "".to_string(),
