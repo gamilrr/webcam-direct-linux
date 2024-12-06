@@ -28,6 +28,15 @@ impl DhcpIpRange {
     /// - The start or end IP address is the router's IP address.
     /// - The start and end IP addresses are not in the same /24 subnet.
     /// - The start IP address is greater than the end IP address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::DhcpIpRange;
+    /// let range = DhcpIpRange::new("192.168.1.10", "192.168.1.20").unwrap();
+    /// assert_eq!(range.get_start_ip(), "192.168.1.10");
+    /// assert_eq!(range.get_end_ip(), "192.168.1.20");
+    /// ```
     pub fn new(start: &str, end: &str) -> Result<DhcpIpRange> {
         let start_ip = Ipv4Addr::from_str(&start)
             .map_err(|_| anyhow!("Invalid start IP address"))?;
@@ -72,6 +81,14 @@ impl DhcpIpRange {
     /// # Returns
     ///
     /// * `String` - The interface IP address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::DhcpIpRange;
+    /// let range = DhcpIpRange::new("192.168.1.10", "192.168.1.20").unwrap();
+    /// assert_eq!(range.get_router_ip(), "192.168.1.1");
+    /// ```
     pub fn get_router_ip(&self) -> String {
         let start_ip = &self.0;
         let octets: Vec<&str> = start_ip.split('.').collect();
@@ -83,6 +100,14 @@ impl DhcpIpRange {
     /// # Returns
     ///
     /// * `&str` - The start IP address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::DhcpIpRange;
+    /// let range = DhcpIpRange::new("192.168.1.10", "192.168.1.20").unwrap();
+    /// assert_eq!(range.get_start_ip(), "192.168.1.10");
+    /// ```
     pub fn get_start_ip(&self) -> &str {
         &self.0
     }
@@ -92,6 +117,14 @@ impl DhcpIpRange {
     /// # Returns
     ///
     /// * `&str` - The end IP address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::DhcpIpRange;
+    /// let range = DhcpIpRange::new("192.168.1.10", "192.168.1.20").unwrap();
+    /// assert_eq!(range.get_end_ip(), "192.168.1.20");
+    /// ```
     pub fn get_end_ip(&self) -> &str {
         &self.1
     }
@@ -138,9 +171,20 @@ mod tests {
     }
 
     #[test]
+    fn test_new_invalid_ip_format() {
+        let range = DhcpIpRange::new("192.168.1.abc", "192.168.1.20");
+        assert!(range.is_err());
+    }
+
+    #[test]
+    fn test_new_invalid_end_ip_format() {
+        let range = DhcpIpRange::new("192.168.1.4", "192.168.1.abc");
+        assert!(range.is_err());
+    }
+
+    #[test]
     fn test_get_interface_ip() {
         let range = DhcpIpRange::new("192.168.1.10", "192.168.1.20").unwrap();
-
         assert_eq!(range.get_router_ip(), "192.168.1.1");
     }
 

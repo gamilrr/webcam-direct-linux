@@ -6,7 +6,7 @@ mod file_hdl;
 mod hostapd_proc;
 mod wpa_ctl;
 
-//export the `HostapdProcCtl` trait and `WifiCredentials` struct from the `hostapd_proc` module.
+// Export the `HostapdProcCtl` trait and `WifiCredentials` struct from the `hostapd_proc` module.
 pub use file_hdl::FileHdl;
 pub use hostapd_proc::{HostapdProc, HostapdProcCtl, WifiCredentials};
 pub use wpa_ctl::WpaCtl;
@@ -71,8 +71,13 @@ impl<P: HostapdProcCtl, C: WpaCtlClientOps> WifiManager<P, C> {
     ///
     /// # Arguments
     ///
+    /// * `creds` - WiFi credentials.
     /// * `hostapd` - Hostapd process control.
     /// * `wpa_ctl` - WPA control client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the initialization fails.
     pub fn new(
         creds: &WifiCredentials, mut hostapd: P, mut wpa_ctl: C,
     ) -> Result<Self> {

@@ -1,11 +1,11 @@
 //! This module provides functionality for managing wireless links using a wireless driver.
 //!
 //! The main components are:
-//! - `IwLinkHandler` trait: Defines the interface for adding an IPv4 address.
+//! - `IwLinkHandler` trait: Defines the interface for adding an IPv4 address and getting the interface name.
 //! - `IwLink` struct: Represents a wireless link and provides methods to manage it.
 //! - `wdev_drv` module: Contains the wireless driver interface and related types.
 
-//Re-export the `WirelessDriver` trait and related types from the `wdev_drv` module.
+// Re-export the `WirelessDriver` trait and related types from the `wdev_drv` module.
 pub mod wdev_drv;
 
 use crate::error::Result;
@@ -52,6 +52,7 @@ impl<T: WirelessDriver> IwLink<T> {
     /// # Arguments
     ///
     /// * `driver` - The wireless driver to be used.
+    /// * `if_name` - The name of the interface.
     ///
     /// # Errors
     ///
@@ -64,7 +65,7 @@ impl<T: WirelessDriver> IwLink<T> {
     /// use crate::wdev_drv::MockWirelessDriver;
     ///
     /// let mock_driver = MockWirelessDriver::new();
-    /// let iw_link = IwLink::with_driver(mock_driver);
+    /// let iw_link = IwLink::new(mock_driver, "test");
     /// ```
     pub fn new(driver: T, if_name: &str) -> Result<Self> {
         let wiphy_idx = match driver.get_ap_wiphy_indx()? {
@@ -137,13 +138,66 @@ mod tests {
     }
 
     #[test]
-    fn test_create_new_link_error() -> Result<()> {
+    fn test_create_new_link_error_get_ap_wiphy_indx() -> Result<()> {
         init_logger();
         let mut mock_driver = MockWirelessDriver::new();
 
         mock_driver
             .expect_get_ap_wiphy_indx()
-            .returning(|| Err(anyhow!("Error")));
+            .returning(|| Err(anyhow!("Error getting wiphy index")));
+
+        let iw_link = IwLink::new(mock_driver, "test");
+
+        assert!(iw_link.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_new_link_error_create_new_link() -> Result<()> {
+        init_logger();
+        let mut mock_driver = MockWirelessDriver::new();
+
+        mock_driver
+            .expect_get_ap_wiphy_indx()
+            .returning(|| Ok(Some(InterfaceIndex(1))));
+
+        mock_driver
+            .expect_create_new_link()
+            .with(eq("test"), eq(InterfaceIndex(1)))
+            .returning(|_, _| Err(anyhow!("Error creating new link")));
+
+        let iw_link = IwLink::new(mock_driver, "test");
+
+        assert!(iw_link.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_new_link_error_no_wiphy_index() -> Result<()> {
+        init_logger();
+        let mut mock_driver = MockWirelessDriver::new();
+
+        mock_driver.expect_get_ap_wiphy_indx().returning(|| Ok(None));
+
+        let iw_link = IwLink::new(mock_driver, "test");
+
+        assert!(iw_link.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_new_link_error_no_interface_index() -> Result<()> {
+        init_logger();
+        let mut mock_driver = MockWirelessDriver::new();
+
+        mock_driver
+            .expect_get_ap_wiphy_indx()
+            .returning(|| Ok(Some(InterfaceIndex(1))));
+
+        mock_driver
+            .expect_create_new_link()
+            .with(eq("test"), eq(InterfaceIndex(1)))
+            .returning(|_, _| Ok(None));
 
         let iw_link = IwLink::new(mock_driver, "test");
 
@@ -247,6 +301,29 @@ mod tests {
             .expect_delete_link()
             .with(eq(InterfaceIndex(1)))
             .returning(|_| Ok(()))
+            .times(1);
+
+        let iw_link = IwLink {
+            driver: mock_driver,
+            if_name: "test".to_string(),
+            current_addr: None,
+            if_idx: InterfaceIndex(1),
+        };
+
+        drop(iw_link); // Explicitly drop to test the Drop implementation
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_drop_link_error() -> Result<()> {
+        init_logger();
+        let mut mock_driver = MockWirelessDriver::new();
+
+        mock_driver
+            .expect_delete_link()
+            .with(eq(InterfaceIndex(1)))
+            .returning(|_| Err(anyhow!("Error deleting link")))
             .times(1);
 
         let iw_link = IwLink {

@@ -6,39 +6,18 @@ mod kv_db;
 mod schemas;
 
 use anyhow::anyhow;
-use kv_db::KvDbOps;
+pub use kv_db::DiskBasedDb;
+pub use kv_db::KvDbOps;
 use log::error;
 use log::info;
-use schemas::ConnectionType;
-use schemas::HostSchema;
-use schemas::MobileSchema;
+pub use schemas::ConnectionType;
+pub use schemas::HostSchema;
+pub use schemas::MobileSchema;
 use uuid::Uuid;
 
+use crate::ble::AppDataStore;
+use crate::ble::HostProvInfo;
 use crate::error::Result;
-
-/// A trait that defines the operations for interacting with the application's data store.
-pub trait AppDataStore {
-    /// Retrieves the host name from the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn get_host_name(&self) -> Result<String>;
-
-    /// Retrieves the host ID from the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn get_host_id(&self) -> Result<String>;
-
-    /// Adds a mobile device to the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
-    fn add_mobile(&mut self, mobile: &MobileSchema) -> Result<()>;
-}
 
 /// A struct that holds the application's data store.
 pub struct AppData<Db> {
@@ -46,6 +25,7 @@ pub struct AppData<Db> {
 }
 
 /// A struct that holds information about the host.
+#[derive(Debug, Clone)]
 pub struct HostInfo {
     pub name: String,
     pub connection_type: ConnectionType,
@@ -85,21 +65,21 @@ impl<Db> AppDataStore for AppData<Db>
 where
     Db: KvDbOps,
 {
-    fn get_host_name(&self) -> Result<String> {
+    fn get_host_prov_info(&self) -> Result<HostProvInfo> {
         if let Some(host) = self.data_db.read::<HostSchema>("host_info")? {
-            info!("Host name retrieved successfully.");
-            return Ok(host.name);
+            info!("Host info retrieved successfully.");
+            return Ok(HostProvInfo {
+                id: host.id,
+                name: host.name,
+                connection_type: if host.connection_type == ConnectionType::WLAN
+                {
+                    "WLAN".to_string()
+                } else {
+                    "AP".to_string()
+                },
+            });
         }
-        error!("Failed to retrieve host name: Host info not found.");
-        Err(anyhow!("Host info not found"))
-    }
-
-    fn get_host_id(&self) -> Result<String> {
-        if let Some(host) = self.data_db.read::<HostSchema>("host_info")? {
-            info!("Host ID retrieved successfully.");
-            return Ok(host.id);
-        }
-        error!("Failed to retrieve host ID: Host info not found.");
+        error!("Failed to retrieve host info: Host info not found.");
         Err(anyhow!("Host info not found"))
     }
 
@@ -116,6 +96,15 @@ where
 
         error!("Failed to add mobile device: Host info not found.");
         Err(anyhow!("Host info not found"))
+    }
+
+    fn get_mobile(&self, id: &str) -> Result<MobileSchema> {
+        if let Some(mobile) = self.data_db.read::<MobileSchema>(id)? {
+            info!("Mobile info retrieved successfully.");
+            return Ok(mobile);
+        }
+        error!("Failed to retrieve mobile info: Mobile info not found.");
+        Err(anyhow!("Mobile info not found"))
     }
 }
 
@@ -152,48 +141,6 @@ mod tests {
 
         let app_data = AppData::new(mock_db, host_info);
         assert!(app_data.is_ok());
-    }
-
-    #[test]
-    fn test_get_host_name() {
-        init_logger();
-        let mut mock_db = MockKvDbOps::new();
-        let host_schema = HostSchema {
-            id: "123".to_string(),
-            name: "TestHost".to_string(),
-            connection_type: ConnectionType::WLAN,
-            registered_mobiles: Vec::new(),
-        };
-
-        mock_db
-            .expect_read::<HostSchema>()
-            .with(eq("host_info"))
-            .returning(move |_| Ok(Some(host_schema.clone())));
-
-        let app_data = AppData { data_db: mock_db };
-        let host_name = app_data.get_host_name();
-        assert_eq!(host_name.unwrap(), "TestHost");
-    }
-
-    #[test]
-    fn test_get_host_id() {
-        init_logger();
-        let mut mock_db = MockKvDbOps::new();
-        let host_schema = HostSchema {
-            id: "123".to_string(),
-            name: "TestHost".to_string(),
-            connection_type: ConnectionType::WLAN,
-            registered_mobiles: Vec::new(),
-        };
-
-        mock_db
-            .expect_read::<HostSchema>()
-            .with(eq("host_info"))
-            .returning(move |_| Ok(Some(host_schema.clone())));
-
-        let app_data = AppData { data_db: mock_db };
-        let host_id = app_data.get_host_id();
-        assert_eq!(host_id.unwrap(), "123");
     }
 
     #[test]

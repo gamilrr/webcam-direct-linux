@@ -151,7 +151,6 @@ impl<I: IwLinkHandler, D: DhcpServerCtl, W: WifiManagerCtl> AccessPointCtl
 mod tests {
     use dhcp_server::MockDhcpServerCtl;
     use iw_link::MockIwLinkHandler;
-    use mockall::predicate::*;
     use wifi_manager::MockWifiManagerCtl;
 
     use super::*;

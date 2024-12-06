@@ -1,4 +1,5 @@
 //! This module contains the implementation to handle the dnsmasq process as a child process.
+
 use super::process_hdl::ProcessHdlOps;
 use crate::error::Result;
 use std::process::Command;
@@ -22,6 +23,33 @@ pub trait DhcpServerCtl {
     /// # Errors
     ///
     /// Returns an error if the process fails to start.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::DhcpServerCtl;
+    /// use your_crate::DnsmasqProc;
+    /// use your_crate::DhcpIpRange;
+    /// use your_crate::process_hdl::ProcessHdlOps;
+    ///
+    /// struct MockProcess;
+    ///
+    /// impl ProcessHdlOps for MockProcess {
+    ///     fn spawn(&self, cmd: &mut Command) -> Result<()> {
+    ///         // Mock implementation
+    ///         Ok(())
+    ///     }
+    ///
+    ///     fn kill(&self) -> Result<()> {
+    ///         // Mock implementation
+    ///         Ok(())
+    ///     }
+    /// }
+    ///
+    /// let mut dnsmasq = DnsmasqProc::new(MockProcess);
+    /// let ip_range = DhcpIpRange::new("192.168.1.100", "192.168.1.200").unwrap();
+    /// dnsmasq.start("wlan0", ip_range).unwrap();
+    /// ```
     fn start(&mut self, iw_name: &str, ip_range: DhcpIpRange) -> Result<()>;
 
     /// Stops the DHCP server.
@@ -29,6 +57,31 @@ pub trait DhcpServerCtl {
     /// # Errors
     ///
     /// Returns an error if the process fails to stop.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::DhcpServerCtl;
+    /// use your_crate::DnsmasqProc;
+    /// use your_crate::process_hdl::ProcessHdlOps;
+    ///
+    /// struct MockProcess;
+    ///
+    /// impl ProcessHdlOps for MockProcess {
+    ///     fn spawn(&self, cmd: &mut Command) -> Result<()> {
+    ///         // Mock implementation
+    ///         Ok(())
+    ///     }
+    ///
+    ///     fn kill(&self) -> Result<()> {
+    ///         // Mock implementation
+    ///         Ok(())
+    ///     }
+    /// }
+    ///
+    /// let mut dnsmasq = DnsmasqProc::new(MockProcess);
+    /// dnsmasq.stop().unwrap();
+    /// ```
     fn stop(&mut self) -> Result<()>;
 }
 
@@ -47,6 +100,29 @@ impl<T: ProcessHdlOps> DnsmasqProc<T> {
     /// # Returns
     ///
     /// A new instance of `DnsmasqCtl`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::DnsmasqProc;
+    /// use your_crate::process_hdl::ProcessHdlOps;
+    ///
+    /// struct MockProcess;
+    ///
+    /// impl ProcessHdlOps for MockProcess {
+    ///     fn spawn(&self, cmd: &mut Command) -> Result<()> {
+    ///         // Mock implementation
+    ///         Ok(())
+    ///     }
+    ///
+    ///     fn kill(&self) -> Result<()> {
+    ///         // Mock implementation
+    ///         Ok(())
+    ///     }
+    /// }
+    ///
+    /// let dnsmasq = DnsmasqProc::new(MockProcess);
+    /// ```
     pub fn new(process: T) -> Self {
         Self { process }
     }
@@ -64,6 +140,11 @@ impl<T: ProcessHdlOps> DhcpServerCtl for DnsmasqProc<T> {
     ///
     /// Returns an error if the process fails to start.
     fn start(&mut self, iw_name: &str, ip_range: DhcpIpRange) -> Result<()> {
+        //check if the interface name is valid
+        if iw_name.is_empty() {
+            return Err(anyhow::anyhow!("Invalid interface name"));
+        }
+
         let ip_range =
             format!("{},{}", ip_range.get_start_ip(), ip_range.get_end_ip());
         let mut cmd = Command::new("dnsmasq");
@@ -187,5 +268,24 @@ mod tests {
         let result = dnsmasq_ctl.stop();
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "Failed to kill process");
+    }
+
+    #[test]
+    fn test_start_dnsmasq_empty_interface() {
+        init_logger();
+        let mut mock_process = MockProcessHdlOps::new();
+        let iw_name = "";
+        let ip_range =
+            DhcpIpRange::new("192.168.1.100", "192.168.1.200").unwrap();
+
+        // Expect the spawn method not to be called
+        mock_process.expect_spawn().times(0);
+
+        let mut dnsmasq_ctl = DnsmasqProc::new(mock_process);
+
+        // Test starting the dnsmasq process with an empty interface name
+        let result = dnsmasq_ctl.start(iw_name, ip_range);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Invalid interface name");
     }
 }

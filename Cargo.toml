@@ -19,6 +19,7 @@ serde = "1.0.203"
 serde_json = "1.0.117"
 sled = { version = "0.34.7", features = ["compression"] }
 tokio = { version = "1.38.1", features = ["full"] }
+tokio-stream = "0.1.16"
 uuid = "1.10.0"
 v4l = "0.14.0"
 v4l2loopback = "0.1.0"
