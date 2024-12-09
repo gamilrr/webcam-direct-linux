@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use async_trait::async_trait;
 use log::{error, info};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -9,12 +10,11 @@ use anyhow::anyhow;
 #[cfg(test)]
 use mockall::automock;
 
-use super::ble_cmd_api::{
-    BleApi, BleBuffer, PubSubPublisher, PubSubSubscriber, PubSubTopic,
-};
+use super::ble_cmd_api::{BleApi, BleBuffer, PubSubSubscriber, PubSubTopic};
 
 //trait
 #[cfg_attr(test, automock)]
+#[async_trait]
 pub trait MultiMobileCommService: Send + Sync + 'static {
     fn set_register_mobile(
         &mut self, addr: String, data: BleBuffer,
@@ -29,10 +29,9 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, data: BleBuffer,
     ) -> Result<()>;
 
-    fn subscribe_to_sdp_req(
+    async fn subscribe_to_sdp_req(
         &mut self, addr: String, max_size: usize,
-    ) -> impl std::future::Future<Output = Result<PubSubSubscriber>>
-           + std::marker::Send;
+    ) -> Result<PubSubSubscriber>;
 
     fn set_mobile_sdp_resp(
         &mut self, addr: String, data: BleBuffer,
@@ -57,9 +56,12 @@ impl BleServer {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    Some(req) = ble_rx.recv() => {
-                       handle_request(&mut comm_handler, req).await;
-                    }
+                    _ = async {
+                         if let Some(req) = ble_rx.recv().await {
+                            handle_request(&mut comm_handler, req).await;
+                         }
+                    }  => {}
+
                     _ = &mut _drop_rx => {
                         info!("MobileManager task is stopping");
                         break;
@@ -80,7 +82,7 @@ impl BleServer {
 //if internally any operation fails, it should handle it accordingly
 async fn handle_request(
     comm_handler: &mut impl MultiMobileCommService, req: BleApi,
-) -> impl Send {
+) {
     match req {
         BleApi::MobileDisconnected(cmd) => {
             info!("Mobile disconnected: {:?}", cmd.addr);

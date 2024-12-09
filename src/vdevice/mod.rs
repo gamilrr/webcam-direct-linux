@@ -2,6 +2,7 @@ use crate::app_data::MobileSchema;
 use crate::ble::{VDeviceBuilderOps, VDeviceMap};
 use crate::error::Result;
 use anyhow::anyhow;
+use async_trait::async_trait;
 use log::{error, info};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,6 @@ use tokio::task;
 use v4l2loopback::{add_device, delete_device, DeviceConfig};
 
 async fn pnp_plug(device: String) -> Result<()> {
-    //let uevent_path = Path::new("/sys/class/video4linux/video0/uevent");
     let uevent_path =
         Path::new(&format!("/sys/class/video4linux/{}", device)).join("uevent");
 
@@ -126,6 +126,7 @@ impl VDeviceBuilder {
     }
 }
 
+#[async_trait]
 impl VDeviceBuilderOps for VDeviceBuilder {
     async fn create_from(&self, mobile: MobileSchema) -> Result<VDeviceMap> {
         let mut device_map = VDeviceMap::new();
@@ -184,11 +185,24 @@ impl VDevice {
             ..Default::default()
         };
 
-        let device_num = task::spawn_blocking(move || {
+        let device_num = match task::spawn_blocking(move || {
             add_device(None, config)
                 .map_err(|e| anyhow!("Failed to add device: {:?}", e))
         })
-        .await??;
+        .await
+        {
+            Ok(Ok(num)) => num,
+            Ok(Err(e)) => {
+                // Handle the error from add_device
+                error!("Error adding device: {:?}", e);
+                return Err(e);
+            }
+            Err(e) => {
+                // Handle the error from spawn_blocking
+                error!("Error spawning blocking task: {:?}", e);
+                return Err(anyhow!("Failed to spawn blocking task: {:?}", e));
+            }
+        };
 
         pnp_plug(format!("video{}", device_num)).await?;
 

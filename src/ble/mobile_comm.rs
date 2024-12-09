@@ -1,5 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use async_trait::async_trait;
 use log::{error, info};
 
 use anyhow::anyhow;
@@ -59,8 +60,9 @@ pub trait AppDataStore: Send + Sync + 'static {
 }
 
 pub type VDeviceMap = HashMap<PathBuf, VDevice>;
+#[async_trait]
 pub trait VDeviceBuilderOps: Send + Sync + 'static {
-    fn create_from(&self, mobile: MobileSchema) -> impl std::future::Future<Output = Result<VDeviceMap>> + std::marker::Send;
+    async fn create_from(&self, mobile: MobileSchema) -> Result<VDeviceMap>;
 }
 //States:
 //Provisioning:   ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
@@ -102,6 +104,7 @@ pub struct MobileComm<Db, VDevBuilder> {
     mobiles_connected: HashMap<Address, ConnectedMobileData>,
     //index to get the mobile address from virtual device path
     vdevice_index: HashMap<PathBuf, Address>,
+
     host_info: String,
     sdp_caller: MobileSdpCaller,
     vdev_builder: VDevBuilder,
@@ -131,6 +134,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     }
 }
 
+#[async_trait]
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
