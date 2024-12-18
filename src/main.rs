@@ -3,7 +3,7 @@ mod app_data;
 mod ble;
 mod error;
 mod gatt_const;
-mod vdevice;
+mod vdevice_builder;
 
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},
@@ -28,7 +28,7 @@ use ble::{
 use tokio::io::AsyncBufReadExt;
 
 use log::info;
-use vdevice::VDeviceBuilder;
+use vdevice_builder::VDeviceBuilder;
 
 fn setup_access_point() -> Result<impl AccessPointCtl> {
     let if_name = "wcdirect0";

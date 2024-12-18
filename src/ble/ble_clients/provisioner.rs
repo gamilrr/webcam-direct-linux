@@ -96,7 +96,8 @@ pub async fn provisioner(
                                     reader_server_conn.send(req).await
                                 {
                                     error!("Error sending host info request");
-                                    return Err(ReqError::Failed);
+                                    //return Err(ReqError::Failed);
+                                    return Ok(vec![]);
                                 }
 
                                 if let Ok(resp) = rx.await {
@@ -111,7 +112,8 @@ pub async fn provisioner(
                                     );
                                 }
 
-                                Err(ReqError::Failed)
+                                //Err(ReqError::Failed)
+                                Ok(vec![])
                             }
                             .boxed()
                         }),
@@ -146,14 +148,15 @@ pub async fn provisioner(
                                         if let Ok(resp) = rx.await {
                                             if let Ok(_) = resp {
                                                 return Ok(());
-                                            } else {
-                                                error!("Error writing mobile info");
+                                            } else if let Err(e) = resp {
+                                                error!("Error writing mobile info, {:?}", e);
                                             }
                                         } else {
                                             error!("Error receiving mobile info response");
                                         }
 
-                                        Err(ReqError::Failed)
+                                        //Err(ReqError::Failed)
+                                        Ok(())
                                     }.boxed()
                             },
                         )),

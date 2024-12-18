@@ -11,7 +11,7 @@ use super::{
     ble_cmd_api::{Address, BleBuffer, PubSubPublisher, PubSubSubscriber},
     ble_server::MultiMobileCommService,
 };
-use crate::vdevice::VDevice;
+use crate::vdevice_builder::VDevice;
 use crate::{app_data::MobileSchema, error::Result};
 
 #[cfg(test)]
@@ -225,6 +225,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
             return Ok(serde_json::to_vec(&ble_comm)?);
         }
 
+        error!("Mobile is not reading host info");
         Err(anyhow!("Mobile is not reading host info"))
     }
 
@@ -266,6 +267,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
                 info!("Mobile: {:#?} in state WriteMobileId", mobile);
             }
         } else {
+            error!("Mobile is not writing mobile info");
             return Err(anyhow!("Mobile is not writing mobile info"));
         }
 
@@ -325,6 +327,9 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
                     return Err(anyhow!("Mobile not found"));
                 }
             }
+        } else {
+            error!("Mobile is not writing mobile id");
+            return Err(anyhow!("Mobile is not writing mobile id"));
         }
 
         Ok(())
@@ -333,6 +338,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     async fn subscribe_to_sdp_req(
         &mut self, addr: String, max_size: usize,
     ) -> Result<PubSubSubscriber> {
+        info!("Subscribe to SDP call: {:?}", addr);
         //get the virtual device
         let vdev_map = if let Some(ConnectedMobileData {
             mobile_state: MobileDataState::SaveMobileData { mobile },
@@ -341,6 +347,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         {
             self.vdev_builder.create_from(mobile.clone()).await?
         } else {
+            error!("Mobile not found in connected devices or in wrong state");
             return Err(anyhow!(
                 "Mobile not found in connected devices or in wrong state"
             ));

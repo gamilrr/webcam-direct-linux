@@ -20,7 +20,7 @@ pub struct VideoProp {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct CameraInfo {
     pub name: String,
-    pub video_format: Vec<VideoProp>,
+    pub format: Vec<VideoProp>,
 }
 
 /// Represents the schema for mobile devices, including ID, name, and associated cameras.

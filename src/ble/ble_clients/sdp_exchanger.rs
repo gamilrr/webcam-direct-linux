@@ -15,10 +15,8 @@ use bluer::gatt::local::{
     CharacteristicWriteMethod, ReqError, Service,
 };
 use bluer::gatt::{CharacteristicReader, CharacteristicWriter};
+use bluer::Adapter;
 use bluer::Uuid;
-use bluer::{
-    adv::AdvertisementHandle, gatt::local::ApplicationHandle, Adapter,
-};
 use futures::{future, pin_mut, FutureExt, StreamExt};
 use log::{error, info};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -67,18 +65,18 @@ async fn send_mobile_pnp_id(
         resp: tx,
     });
 
-    server_conn.send(cmd).await.map_err(|_| {
-        error!("Error sending mobile pnp id request");
+    server_conn.send(cmd).await.map_err(|e| {
+        error!("Error sending mobile pnp id request {:?}", e);
         anyhow!("Error sending mobile pnp id request")
     })?;
 
-    let resp = rx.await.map_err(|_| {
-        error!("Error receiving mobile pnp id response");
+    let resp = rx.await.map_err(|e| {
+        error!("Error receiving mobile pnp id response, {:?}", e);
         anyhow!("Error receiving mobile pnp id response")
     })?;
 
-    resp.map_err(|_| {
-        error!("Error mobile is not registered");
+    resp.map_err(|e| {
+        error!("Error mobile is not registered, {:?}", e);
         anyhow!("Error mobile is not registered")
     })?;
 
@@ -218,12 +216,12 @@ async fn sdp_exchanger(
 
             }
 
-            read_res = async {
-                match &mut pnp_reader_opt {
+            _ = async {
+                let read_res = match &mut pnp_reader_opt {
                     Some(reader) => reader.read(&mut pnp_read_buf).await,
                     None => future::pending().await,
-                }
-            } => {
+                };
+
                 match read_res {
                     Ok(0) => {
                         info!("Write stream ended");
@@ -243,6 +241,7 @@ async fn sdp_exchanger(
                         pnp_reader_opt = None;
                     }
                 }
+            } => {
             }
 
             //sdp exchange write event
@@ -278,31 +277,27 @@ async fn sdp_exchanger(
                 }
             }
 
-            read_res = async {
-                match &mut sdp_reader_opt {
+            _ = async {
+                let read_res = match &mut sdp_reader_opt {
                     Some(reader) => reader.read(&mut sdp_read_buf).await,
                     None => future::pending().await,
-                }
-            } => {
+                };
+
                 match read_res {
                     Ok(0) => {
                         info!("Write stream ended");
-                        pnp_reader_opt = None;
+                        sdp_reader_opt = None;
                     }
                     Ok(n) => {
-                        if let Err(e) = send_mobile_pnp_id(
-                            server_conn.clone(),
-                            current_device_addr.clone(),
-                            pnp_read_buf[0..n].to_vec(),
-                        ).await {
-                            error!("Failed to send mobile pnp id: {:?}", e);
-                        }
+                        //todo
+                        info!("Received SDP data: {:?}", &sdp_read_buf[0..n]);
                     }
                     Err(err) => {
                         info!("Write stream error: {}", &err);
-                        pnp_reader_opt = None;
+                        sdp_reader_opt = None;
                     }
                 }
+            } => {
             }
 
             //receive data from server
