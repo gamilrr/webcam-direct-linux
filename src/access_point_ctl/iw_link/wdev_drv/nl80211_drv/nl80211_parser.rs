@@ -5,7 +5,7 @@
 use super::nl80211_const::Nl80211Iftype;
 use crate::error::Result;
 
-use log::info;
+use log::{info, trace};
 use neli::{
     attr::Attribute,
     genl::{Genlmsghdr, Nlattr},
@@ -36,7 +36,7 @@ pub struct WiPhyProps {
 pub fn parse_nl80211_payload(
     gen_msg: &Genlmsghdr<Nl80211Command, Nl80211Attribute>,
 ) -> Result<WiPhyProps> {
-    info!("Received message {:#?}", gen_msg);
+    trace!("Received message {:#?}", gen_msg);
 
     let mut props =
         WiPhyProps { phy_idx: None, ap_supported: None, if_idx: None };

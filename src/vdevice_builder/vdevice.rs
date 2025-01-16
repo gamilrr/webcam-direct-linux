@@ -19,8 +19,8 @@ impl VDevice {
             max_width: 4000,
             min_height: 100,
             max_height: 4000,
-            max_buffers: 9, 
-            max_openers: 3,
+            max_buffers: 9,
+            max_openers: 1,
             label: name.clone(),
             ..Default::default()
         };
@@ -28,7 +28,7 @@ impl VDevice {
         info!("Adding virtual device with name {}", name);
 
         let device_num = match add_device(None, config)
-                .map_err(|e| anyhow!("Failed to add device: {:?}", e))
+            .map_err(|e| anyhow!("Failed to add device: {:?}", e))
         {
             Ok(num) => num,
             Err(e) => {
